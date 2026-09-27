@@ -69,7 +69,7 @@ impl Backend for DesktopBackend {
         // Native dialogs are modal; showing one synchronously from a UI
         // callback (already on the UI thread) is the standard pattern.
         let picked = rfd::FileDialog::new()
-            .add_filter("Matroska", &["mkv"])
+            .add_filter("Matroska", mkv_ui::file_types::SUPPORTED_EXTENSIONS)
             .set_title("Open MKV files")
             .pick_files()
             .unwrap_or_default();

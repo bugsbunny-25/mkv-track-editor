@@ -1,4 +1,5 @@
 mod backend;
+mod file_drop;
 
 use backend::DesktopBackend;
 use mkv_core::{config_store, ToolPaths};
@@ -46,7 +47,11 @@ fn main() {
     tracing::info!(config = %config_path.display(), "using settings file");
     let backend = DesktopBackend::new(rt.handle().clone(), tools, config_path);
 
-    if let Err(e) = mkv_ui::launch(backend) {
+    let result = mkv_ui::App::new(backend).and_then(|app| {
+        file_drop::install(&app);
+        app.run()
+    });
+    if let Err(e) = result {
         tracing::error!(error = %e, "UI exited with an error");
         std::process::exit(1);
     }

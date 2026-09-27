@@ -10,7 +10,8 @@
 use crate::backend::{Backend, ProgressCallback, SourceRef, UiCallback};
 use crate::document::{Document, FactKind, Flag, JobState};
 use crate::settings::{self, NamingForm, ProfileForm, COLON_OPTIONS};
-use crate::{AppWindow, BadgeData, Bridge, DirRow, DocTabData, InfoRowData, Tone, TrackKind, TrackRowData};
+use crate::file_types::{self, FileKind};
+use crate::{AppWindow, BadgeData, Bridge, DirRow, DocTabData, DropState, InfoRowData, Tone, TrackKind, TrackRowData};
 use mkv_profiles::labels::{audio_attrs, video_attrs};
 use mkv_profiles::{lang, AppConfig, MediaKind, QualitySource, Revision};
 use mkv_types::{FileAnalysis, JobOutcome, JobProgress, TrackType};
@@ -45,6 +46,20 @@ struct State {
     /// "Save all": (doc id, output) waiting to run, one job at a time.
     save_queue: VecDeque<(u64, SourceRef)>,
     error: String,
+    /// Files currently dragged over the window.
+    drag: DragState,
+}
+
+/// The OS reports a drag one file at a time (hover events), then delivers
+/// the drop one file at a time too; this accumulates both.
+#[derive(Default)]
+struct DragState {
+    openable: usize,
+    rejected: usize,
+    /// Dropped files that were turned away, reported together once the
+    /// whole drop has been delivered.
+    dropped_rejects: Vec<(String, FileKind)>,
+    flush_scheduled: bool,
 }
 
 impl State {
@@ -88,8 +103,105 @@ fn strings(items: impl IntoIterator<Item = String>) -> ModelRc<SharedString> {
 
 /// Wires the shared `.slint` UI to `backend` and runs the Slint event loop.
 pub fn launch(backend: impl Backend) -> Result<(), slint::PlatformError> {
+    App::new(backend)?.run()
+}
+
+/// The wired-up application before its event loop runs. Platforms that need
+/// to hook into the window (e.g. desktop drag and drop) do so between
+/// [`App::new`] and [`App::run`].
+pub struct App {
+    window: AppWindow,
+    ctx: Ctx,
+}
+
+/// A cheap, cloneable handle for feeding platform events into the UI. Use
+/// it only on the UI thread.
+#[derive(Clone)]
+pub struct AppHandle {
+    ctx: Ctx,
+}
+
+impl App {
+    pub fn new(backend: impl Backend) -> Result<Self, slint::PlatformError> {
+        new_app(Arc::new(backend))
+    }
+
+    pub fn window(&self) -> &AppWindow {
+        &self.window
+    }
+
+    pub fn handle(&self) -> AppHandle {
+        AppHandle { ctx: self.ctx.clone() }
+    }
+
+    pub fn run(self) -> Result<(), slint::PlatformError> {
+        self.window.run()
+    }
+}
+
+impl AppHandle {
+    /// A file is being dragged over the window (called once per file).
+    pub fn drag_entered(&self, path: &str) {
+        self.ctx.with(|b, st| {
+            if file_types::classify(path).is_supported() {
+                st.drag.openable += 1;
+            } else {
+                st.drag.rejected += 1;
+            }
+            sync_drop(b, st);
+        });
+    }
+
+    /// The drag left the window or was cancelled.
+    pub fn drag_left(&self) {
+        self.ctx.with(|b, st| {
+            st.drag.openable = 0;
+            st.drag.rejected = 0;
+            sync_drop(b, st);
+        });
+    }
+
+    /// A file was dropped (called once per file). MKV files open in new
+    /// tabs; anything else is reported in one message after the drop.
+    pub fn file_dropped(&self, path: String) {
+        let kind = file_types::classify(&path);
+        let schedule_flush = self
+            .ctx
+            .with(|b, st| {
+                st.drag.openable = 0;
+                st.drag.rejected = 0;
+                sync_drop(b, st);
+                if kind.is_supported() {
+                    return false;
+                }
+                let name = SourceRef::LocalPath(path.clone()).file_name().to_string();
+                st.drag.dropped_rejects.push((name, kind));
+                !std::mem::replace(&mut st.drag.flush_scheduled, true)
+            })
+            .unwrap_or(false);
+
+        if kind.is_supported() {
+            open_source(&self.ctx, SourceRef::LocalPath(path));
+        } else if schedule_flush {
+            // The remaining files of this drop arrive as separate events in
+            // the same event-loop turn; report after all of them.
+            let ctx = self.ctx.clone();
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                ctx.with(|b, st| {
+                    let rejected = std::mem::take(&mut st.drag.dropped_rejects);
+                    st.drag.flush_scheduled = false;
+                    if let Some(message) = file_types::rejection_message(&rejected) {
+                        st.error = message;
+                        sync_nav(b, st);
+                    }
+                });
+            });
+        }
+    }
+}
+
+fn new_app(backend: Arc<dyn Backend>) -> Result<App, slint::PlatformError> {
     let window = AppWindow::new()?;
-    let backend: Arc<dyn Backend> = Arc::new(backend);
     let native = backend.capabilities().native_file_dialog;
     let config = AppConfig::default();
 
@@ -114,6 +226,7 @@ pub fn launch(backend: impl Backend) -> Result<(), slint::PlatformError> {
         language_codes: Vec::new(),
         save_queue: VecDeque::new(),
         error: String::new(),
+        drag: DragState::default(),
     };
     let ctx = Ctx {
         window: window.as_weak(),
@@ -143,7 +256,7 @@ pub fn launch(backend: impl Backend) -> Result<(), slint::PlatformError> {
         load_roots(&ctx);
     }
 
-    window.run()
+    Ok(App { window, ctx })
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +301,16 @@ fn sync_nav(b: &Bridge, st: &State) {
     if let Some(doc) = st.active_doc() {
         sync_header(b, doc);
     }
+}
+
+fn sync_drop(b: &Bridge, st: &State) {
+    let DragState { openable, rejected, .. } = st.drag;
+    b.set_drop_state(match (openable, rejected) {
+        (0, 0) => DropState::None,
+        (0, _) => DropState::Reject,
+        _ => DropState::Accept,
+    });
+    b.set_drop_count(openable as i32);
 }
 
 /// Title, file name, media facts and change count. Cheap, so it runs with

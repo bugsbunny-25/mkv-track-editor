@@ -35,6 +35,8 @@ export global Theme {
     out property <color> border: dark ? Swatches.neutral-800 : Swatches.neutral-150;
     out property <color> border-strong: dark ? Swatches.neutral-700 : Swatches.neutral-200;
     out property <color> shadow: dark ? transparent : Swatches.neutral-950.with-alpha(0.06);
+    // Backdrop behind full-window overlays.
+    out property <color> scrim: canvas.with-alpha(0.9);
 
     // --- text --------------------------------------------------------------
     out property <color> text-primary: dark ? Swatches.neutral-100 : Swatches.neutral-900;
@@ -104,6 +106,7 @@ export global Theme {
     out property <length> track-row-height: 58px;
     out property <length> inspector-width: 320px;
     out property <length> border-width: 1px;
+    out property <length> border-width-emphasis: 2px;
 
     // --- motion ------------------------------------------------------------
     out property <duration> duration-fast: 120ms;

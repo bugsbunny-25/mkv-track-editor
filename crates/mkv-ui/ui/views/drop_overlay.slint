@@ -1,0 +1,57 @@
+// Full-window drop target shown while files are dragged over the window
+// (desktop). Tells the user up front whether the drop will open anything:
+// only MKV video is accepted.
+
+import { Theme, Tone, Icons, IconTile, TitleText, SecondaryText } from "../components/index.slint";
+import { Bridge, DropState } from "../bridge.slint";
+
+export component DropOverlay inherits Rectangle {
+    property <bool> accepting: Bridge.drop-state == DropState.accept;
+    property <Tone> tone: accepting ? Tone.accent : Tone.danger;
+
+    background: Theme.scrim;
+    accessible-role: AccessibleRole.text;
+    accessible-label: title.text;
+
+    // Swallow pointer input so nothing underneath reacts mid-drag.
+    TouchArea { }
+
+    Rectangle {
+        x: Theme.space-5;
+        y: Theme.space-5;
+        width: parent.width - 2 * Theme.space-5;
+        height: parent.height - 2 * Theme.space-5;
+        border-radius: Theme.radius-lg;
+        border-width: Theme.border-width-emphasis;
+        border-color: Theme.tone-solid(root.tone);
+        background: Theme.tone-background(root.tone).with-alpha(0.5);
+
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-3;
+
+            HorizontalLayout {
+                alignment: center;
+                IconTile {
+                    icon: root.accepting ? Icons.file : Icons.alert;
+                    tone: root.tone;
+                    size: Theme.tile-lg;
+                    icon-size: Theme.icon-xl;
+                }
+            }
+            title := TitleText {
+                horizontal-alignment: center;
+                font-size: Theme.font-headline;
+                text: !root.accepting
+                    ? "Only MKV video files can be opened"
+                    : (Bridge.drop-count == 1 ? "Drop to open 1 MKV file" : "Drop to open " + Bridge.drop-count + " MKV files");
+            }
+            SecondaryText {
+                horizontal-alignment: center;
+                text: root.accepting
+                    ? "Each file opens in its own tab. Other files in the drop are skipped."
+                    : "Other formats can't be edited. Convert them to Matroska (.mkv) first.";
+            }
+        }
+    }
+}

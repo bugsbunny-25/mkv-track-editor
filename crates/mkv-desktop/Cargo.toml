@@ -18,5 +18,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-slint = "1"
+# `unstable-winit-030` exposes winit window events (OS file drag and drop).
+# Unstable Slint APIs may change between minor releases, hence the ~1.17 pin.
+slint = { version = "~1.17", features = ["unstable-winit-030"] }
 rfd = "0.15"

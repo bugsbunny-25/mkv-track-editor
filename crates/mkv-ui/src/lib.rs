@@ -5,10 +5,11 @@
 
 pub mod backend;
 pub mod document;
+pub mod file_types;
 pub mod settings;
 mod view_model;
 
 slint::include_modules!();
 
 pub use backend::{Backend, BackendCapabilities, ProgressCallback, SourceRef, UiCallback, UiError};
-pub use view_model::launch;
+pub use view_model::{launch, App, AppHandle};

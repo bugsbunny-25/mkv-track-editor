@@ -21,6 +21,9 @@ fallback, HDR10+, HLG, Atmos, DTS:X, channel layouts, subtitle event counts).
 
 - **Tabs** — open many files; each tab shows a status dot (pending changes,
   saving %, saved, failed). "Apply to all" / "Save all" for batches.
+- **Drag and drop** (desktop) — drop MKV files onto the window to open them.
+  The window shows whether a drag will be accepted; other files (MP4, MOV,
+  images, …) are skipped with a message, since only Matroska can be edited.
 - **Tracks** — keep/drop (dropped tracks stay visible, dimmed), reorder within
   a type, rename, language, and flag toggles: **D**efault, **F**orced,
   **O**riginal language, **HI** (hearing impaired), **AD** (audio

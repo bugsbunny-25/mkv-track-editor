@@ -10,6 +10,15 @@ export enum TrackKind {
     subtitle,
 }
 
+// Files being dragged over the window (desktop).
+export enum DropState {
+    none,
+    // At least one dragged file is an MKV that will be opened.
+    accept,
+    // Nothing being dragged can be opened.
+    reject,
+}
+
 // A media fact shown in the document header ("2160p", "DV8 HDR10", ...).
 export struct BadgeData {
     text: string,
@@ -73,6 +82,11 @@ export global Bridge {
     callback open-requested();
     callback toggle-settings();
     callback dismiss-error();
+
+    // --- drag and drop (desktop) -------------------------------------------
+    in property <DropState> drop-state;
+    // Openable files in the current drag.
+    in property <int> drop-count;
 
     // --- volume browser (web) ---------------------------------------------
     in property <[DirRow]> browse-entries;

@@ -6,13 +6,14 @@
 // the screens. Views never use raw colours or sizes — only `Theme` tokens.
 
 import { Theme, Tone, Icons, Banner, EmptyState } from "components/index.slint";
-import { Bridge, DocTabData, TrackRowData, InfoRowData, DirRow, BadgeData, TrackKind } from "bridge.slint";
+import { Bridge, DocTabData, TrackRowData, InfoRowData, DirRow, BadgeData, TrackKind, DropState } from "bridge.slint";
 import { AppBar } from "views/app_bar.slint";
 import { DocumentView } from "views/document_view.slint";
 import { SettingsView } from "views/settings_view.slint";
 import { VolumeBrowser } from "views/volume_browser.slint";
+import { DropOverlay } from "views/drop_overlay.slint";
 
-export { Bridge, DocTabData, TrackRowData, InfoRowData, DirRow, BadgeData, TrackKind, Tone }
+export { Bridge, DocTabData, TrackRowData, InfoRowData, DirRow, BadgeData, TrackKind, DropState, Tone }
 
 export component AppWindow inherits Window {
     title: "MKV Track Editor";
@@ -44,11 +45,15 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             icon: Icons.movie;
             title: "Open an MKV file to get started";
-            message: "Each file opens in its own tab with your default profile applied. Nothing is re-encoded.";
+            message: (Bridge.native-dialogs ? "Drop MKV files here or open them. " : "")
+                + "Each file opens in its own tab with your default profile applied. Nothing is re-encoded.";
             action-text: "Open files";
             action-icon: Icons.plus;
             action => { Bridge.open-requested(); }
         }
         if !Bridge.show-settings && !Bridge.show-browser && Bridge.active-tab >= 0: DocumentView { vertical-stretch: 1; }
     }
+
+    // Above everything else while files are dragged over the window.
+    if Bridge.drop-state != DropState.none: DropOverlay { }
 }
