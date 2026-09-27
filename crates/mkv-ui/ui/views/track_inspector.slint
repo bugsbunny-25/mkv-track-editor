@@ -1,17 +1,18 @@
 // Editor panel for the selected track: name, language, flags and order.
 // Keeps the list rows free of inputs so they stay scannable.
 
-import { LineEdit, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import {
-    Theme, Icons, IconTile, Toggle, ToggleRow, Button, ControlSize, Card, Divider, FormField,
+    TextField, Theme, Icons, IconTile, Toggle, ToggleRow, Button, ControlSize, Card, Divider, FormField,
     TitleText, CaptionText, OverlineText, SecondaryText,
 } from "../components/index.slint";
 import { Bridge, TrackRowData } from "../bridge.slint";
 import { ViewState, TrackStyle } from "view_state.slint";
 
-export component TrackInspector inherits Card {
+// The inspector's content for one track. Hosted in a scroll view in the
+// side panel, or inline (natural height) when the whole page scrolls.
+component InspectorBody inherits VerticalLayout {
     property <int> index: ViewState.selected-track;
-    property <bool> has-track: index >= 0 && index < Bridge.tracks.length;
     property <TrackRowData> track: Bridge.tracks[index];
     property <string> summary: track.codec + (track.detail != "" ? "  ·  " + track.detail : "");
 
@@ -25,150 +26,164 @@ export component TrackInspector inherits Card {
     changed index => { self.sync-fields(); }
     changed track => { self.sync-fields(); }
 
+    padding: Theme.space-5;
+    spacing: Theme.space-4;
+    alignment: start;
+
+    HorizontalLayout {
+        spacing: Theme.space-3;
+        VerticalLayout {
+            alignment: center;
+            IconTile {
+                icon: TrackStyle.icon(root.track.kind);
+                tone: TrackStyle.tone(root.track.kind);
+                size: Theme.tile-md + 4px;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-0-5;
+            horizontal-stretch: 1;
+            TitleText { text: TrackStyle.label(root.track.kind) + " track " + root.track.ordinal; font-size: Theme.font-headline - 2px; }
+            CaptionText { text: root.summary; overflow: elide; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Toggle {
+                checked: root.track.keep;
+                accessible-name: "Keep track";
+                toggled(value) => { Bridge.set-keep(root.index, value); }
+            }
+        }
+    }
+
+    Divider { }
+
+    FormField {
+        label: "Track name";
+        name-edit := TextField {
+            placeholder-text: "No name";
+            enabled: root.track.keep;
+            edited(text) => { Bridge.rename-track(root.index, text); }
+        }
+    }
+    FormField {
+        label: "Language";
+        hint: root.track.language-name != "" ? root.track.language-name : "ISO 639 code, e.g. eng or en";
+        language-edit := TextField {
+            placeholder-text: "und";
+            enabled: root.track.keep;
+            edited(text) => { Bridge.set-language(root.index, text); }
+        }
+    }
+
+    Divider { }
+
+    VerticalLayout {
+        spacing: Theme.space-3;
+        OverlineText { label: "Flags"; }
+        ToggleRow {
+            label: "Default";
+            description: "Players pick this track first.";
+            checked: root.track.is-default;
+            enabled: root.track.keep;
+            toggled(value) => { Bridge.set-flag(root.index, "default", value); }
+        }
+        ToggleRow {
+            label: "Forced";
+            description: "Always shown, e.g. foreign dialogue.";
+            checked: root.track.is-forced;
+            enabled: root.track.keep;
+            toggled(value) => { Bridge.set-flag(root.index, "forced", value); }
+        }
+        ToggleRow {
+            label: "Original language";
+            description: "In the title's original language.";
+            checked: root.track.is-original;
+            enabled: root.track.keep;
+            toggled(value) => { Bridge.set-flag(root.index, "original", value); }
+        }
+        ToggleRow {
+            label: "Hearing impaired";
+            description: "SDH or closed captions.";
+            checked: root.track.is-hi;
+            enabled: root.track.keep;
+            toggled(value) => { Bridge.set-flag(root.index, "hi", value); }
+        }
+        ToggleRow {
+            label: "Audio description";
+            description: "Narration for visually impaired viewers.";
+            checked: root.track.is-vi;
+            enabled: root.track.keep;
+            toggled(value) => { Bridge.set-flag(root.index, "vi", value); }
+        }
+        ToggleRow {
+            label: "Commentary";
+            description: "Director or cast commentary.";
+            checked: root.track.is-commentary;
+            enabled: root.track.keep;
+            toggled(value) => { Bridge.set-flag(root.index, "commentary", value); }
+        }
+    }
+
+    Divider { }
+
+    HorizontalLayout {
+        spacing: Theme.space-2;
+        Button {
+            text: "Move up";
+            icon: Icons.chevron-up;
+            size: ControlSize.small;
+            horizontal-stretch: 1;
+            enabled: root.track.can-up;
+            clicked => {
+                Bridge.move-track(root.index, root.index - 1);
+                ViewState.selected-track = root.index - 1;
+            }
+        }
+        Button {
+            text: "Move down";
+            icon: Icons.chevron-down;
+            size: ControlSize.small;
+            horizontal-stretch: 1;
+            enabled: root.track.can-down;
+            clicked => {
+                Bridge.move-track(root.index, root.index + 1);
+                ViewState.selected-track = root.index + 1;
+            }
+        }
+    }
+}
+
+export component TrackInspector inherits Card {
+    // Scroll inside the card (side panel) or take the content's natural
+    // height (stacked under the list on narrow screens).
+    in property <bool> scrolls: true;
+
+    property <bool> has-track: ViewState.selected-track >= 0 && ViewState.selected-track < Bridge.tracks.length;
+
     // Keep the selection valid when the track list shrinks (tab switch,
     // reset).
     changed has-track => {
         if (!self.has-track && Bridge.tracks.length > 0) { ViewState.selected-track = 0; }
     }
 
-    if !root.has-track: VerticalLayout {
-        alignment: center;
-        padding: Theme.space-6;
-        SecondaryText {
-            text: "Select a track to edit its name, language and flags.";
-            wrap: word-wrap;
-            horizontal-alignment: center;
-        }
-    }
-
-    scroll := ScrollView {
-        visible: root.has-track;
-
-        VerticalLayout {
-            width: scroll.visible-width;
-            padding: Theme.space-4;
-            spacing: Theme.space-4;
-            alignment: start;
-
-            HorizontalLayout {
-                spacing: Theme.space-3;
-                VerticalLayout {
-                    alignment: center;
-                    IconTile { icon: TrackStyle.icon(root.track.kind); tone: TrackStyle.tone(root.track.kind); }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    spacing: Theme.space-0-5;
-                    horizontal-stretch: 1;
-                    TitleText { text: TrackStyle.label(root.track.kind) + " track " + root.track.ordinal; }
-                    CaptionText { text: root.summary; overflow: elide; }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Toggle {
-                        checked: root.track.keep;
-                        accessible-name: "Keep track";
-                        toggled(value) => { Bridge.set-keep(root.index, value); }
-                    }
-                }
-            }
-
-            Divider { }
-
-            FormField {
-                label: "Track name";
-                name-edit := LineEdit {
-                    placeholder-text: "No name";
-                    enabled: root.track.keep;
-                    edited(text) => { Bridge.rename-track(root.index, text); }
-                }
-            }
-            FormField {
-                label: "Language";
-                hint: root.track.language-name != "" ? root.track.language-name : "ISO 639 code, e.g. eng or en";
-                language-edit := LineEdit {
-                    placeholder-text: "und";
-                    enabled: root.track.keep;
-                    edited(text) => { Bridge.set-language(root.index, text); }
-                }
-            }
-
-            Divider { }
-
-            VerticalLayout {
-                spacing: Theme.space-3;
-                OverlineText { text: "Flags"; }
-                ToggleRow {
-                    label: "Default";
-                    description: "Players pick this track first.";
-                    checked: root.track.is-default;
-                    enabled: root.track.keep;
-                    toggled(value) => { Bridge.set-flag(root.index, "default", value); }
-                }
-                ToggleRow {
-                    label: "Forced";
-                    description: "Always shown, e.g. foreign dialogue.";
-                    checked: root.track.is-forced;
-                    enabled: root.track.keep;
-                    toggled(value) => { Bridge.set-flag(root.index, "forced", value); }
-                }
-                ToggleRow {
-                    label: "Original language";
-                    description: "In the title's original language.";
-                    checked: root.track.is-original;
-                    enabled: root.track.keep;
-                    toggled(value) => { Bridge.set-flag(root.index, "original", value); }
-                }
-                ToggleRow {
-                    label: "Hearing impaired";
-                    description: "SDH or closed captions.";
-                    checked: root.track.is-hi;
-                    enabled: root.track.keep;
-                    toggled(value) => { Bridge.set-flag(root.index, "hi", value); }
-                }
-                ToggleRow {
-                    label: "Audio description";
-                    description: "Narration for visually impaired viewers.";
-                    checked: root.track.is-vi;
-                    enabled: root.track.keep;
-                    toggled(value) => { Bridge.set-flag(root.index, "vi", value); }
-                }
-                ToggleRow {
-                    label: "Commentary";
-                    description: "Director or cast commentary.";
-                    checked: root.track.is-commentary;
-                    enabled: root.track.keep;
-                    toggled(value) => { Bridge.set-flag(root.index, "commentary", value); }
-                }
-            }
-
-            Divider { }
-
-            HorizontalLayout {
-                spacing: Theme.space-2;
-                Button {
-                    text: "Move up";
-                    icon: Icons.chevron-up;
-                    size: ControlSize.small;
-                    horizontal-stretch: 1;
-                    enabled: root.track.can-up;
-                    clicked => {
-                        Bridge.move-track(root.index, root.index - 1);
-                        ViewState.selected-track = root.index - 1;
-                    }
-                }
-                Button {
-                    text: "Move down";
-                    icon: Icons.chevron-down;
-                    size: ControlSize.small;
-                    horizontal-stretch: 1;
-                    enabled: root.track.can-down;
-                    clicked => {
-                        Bridge.move-track(root.index, root.index + 1);
-                        ViewState.selected-track = root.index + 1;
-                    }
-                }
+    // A layout so the conditional children count toward the card's
+    // height when it sizes to its content.
+    VerticalLayout {
+        if !root.has-track: VerticalLayout {
+            alignment: center;
+            padding: Theme.space-6;
+            SecondaryText {
+                text: "Select a track to edit its name, language and flags.";
+                wrap: word-wrap;
+                horizontal-alignment: center;
             }
         }
+
+        if root.has-track && root.scrolls: scroll := ScrollView {
+            InspectorBody { width: scroll.visible-width; }
+        }
+        if root.has-track && !root.scrolls: InspectorBody { }
     }
 }

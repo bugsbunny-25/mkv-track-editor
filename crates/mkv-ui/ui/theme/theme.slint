@@ -2,8 +2,12 @@
 // through `Theme` (and `Tone` for semantic colouring) — never raw colours,
 // sizes or font sizes.
 //
+// Design language: Playful Geometric — clean content areas on warm paper,
+// chunky 2px ink outlines, hard offset ("sticker") shadows with no blur,
+// pill controls, and violet / pink / yellow / mint confetti accents.
+//
 // The scheme follows the std-widgets `Palette`, so our components and the
-// stock text inputs / combo boxes always agree on light vs dark.
+// stock widgets always agree on light vs dark.
 
 import { Palette } from "std-widgets.slint";
 import { Swatches } from "swatches.slint";
@@ -26,38 +30,60 @@ export global Theme {
     out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
 
     // --- surfaces ----------------------------------------------------------
-    // Window background, behind cards.
-    out property <color> canvas: dark ? Swatches.neutral-950 : Swatches.neutral-50;
-    // Cards, bars, panels.
-    out property <color> surface: dark ? Swatches.neutral-900 : Swatches.neutral-0;
-    // Wells inside a surface: segmented-control track, header tiles.
-    out property <color> surface-muted: dark ? Swatches.neutral-850 : Swatches.neutral-100;
-    out property <color> border: dark ? Swatches.neutral-800 : Swatches.neutral-150;
-    out property <color> border-strong: dark ? Swatches.neutral-700 : Swatches.neutral-200;
-    out property <color> shadow: dark ? transparent : Swatches.neutral-950.with-alpha(0.06);
+    // Window background ("paper"), behind cards.
+    out property <color> canvas: dark ? Swatches.night-950 : Swatches.paper;
+    // Cards, bars, panels, inputs.
+    out property <color> surface: dark ? Swatches.night-900 : Swatches.white;
+    // Wells inside a surface: segmented-control track, chips, toggles.
+    out property <color> surface-muted: dark ? Swatches.night-850 : Swatches.slate-100;
+    // Quiet separators inside a card.
+    out property <color> border: dark ? Swatches.night-800 : Swatches.slate-200;
+    // Resting input outline; ≥ 3:1 against the surface so controls are
+    // identifiable (WCAG 1.4.11).
+    out property <color> border-strong: dark ? Swatches.night-450 : Swatches.slate-500;
+    // The chunky outline around cards, buttons and shapes.
+    out property <color> ink: dark ? Swatches.cream : Swatches.slate-800;
+    // Hard offset shadows: `pop` behind controls, `card` behind cards.
+    out property <color> shadow-pop: ink;
+    out property <color> shadow-card: dark ? Swatches.night-shadow : Swatches.slate-200;
+    out property <color> shadow-featured: dark ? Swatches.pink-300 : Swatches.pink-400;
+    // Dot-grid pattern on the canvas.
+    out property <color> pattern: dark ? Swatches.night-800 : Swatches.slate-300;
+    // Legacy soft shadow; the design uses hard shadows instead.
+    out property <color> shadow: transparent;
     // Backdrop behind full-window overlays.
-    out property <color> scrim: canvas.with-alpha(0.9);
+    out property <color> scrim: canvas.with-alpha(0.92);
 
     // --- text --------------------------------------------------------------
-    out property <color> text-primary: dark ? Swatches.neutral-100 : Swatches.neutral-900;
-    out property <color> text-secondary: dark ? Swatches.neutral-300 : Swatches.neutral-600;
-    out property <color> text-muted: dark ? Swatches.neutral-500 : Swatches.neutral-400;
-    out property <color> text-disabled: dark ? Swatches.neutral-700 : Swatches.neutral-300;
+    out property <color> text-primary: dark ? Swatches.cream : Swatches.slate-800;
+    out property <color> text-secondary: dark ? Swatches.night-200 : Swatches.slate-700;
+    // ≥ 4.5:1 on every surface, well and tint it sits on (WCAG 1.4.3).
+    out property <color> text-muted: dark ? Swatches.night-400 : Swatches.slate-600;
+    out property <color> text-disabled: dark ? Swatches.night-500 : Swatches.slate-400;
 
     // --- accent ------------------------------------------------------------
-    out property <color> accent: dark ? Swatches.violet-500 : Swatches.violet-600;
-    out property <color> accent-hover: dark ? Swatches.violet-400 : Swatches.violet-700;
-    out property <color> accent-subtle: dark ? Swatches.violet-900 : Swatches.violet-50;
+    // Light scheme uses violet-600 so white text on it reaches 4.5:1.
+    out property <color> accent: dark ? Swatches.violet-400 : Swatches.violet-600;
+    out property <color> accent-hover: dark ? Swatches.violet-300 : Swatches.violet-700;
+    out property <color> accent-subtle: dark ? Swatches.violet-night : Swatches.violet-50;
     out property <color> accent-text: dark ? Swatches.violet-300 : Swatches.violet-700;
-    out property <color> on-accent: Swatches.neutral-0;
+    out property <color> on-accent: dark ? Swatches.night-950 : Swatches.white;
     out property <color> focus-ring: accent;
 
+    // --- confetti (decoration and playful highlights) ------------------------
+    out property <color> pink: dark ? Swatches.pink-300 : Swatches.pink-400;
+    out property <color> yellow: dark ? Swatches.yellow-300 : Swatches.yellow-400;
+    out property <color> mint: dark ? Swatches.mint-300 : Swatches.mint-400;
+    // Text on any confetti fill; they stay light in both schemes.
+    out property <color> on-confetti: dark ? Swatches.night-950 : Swatches.slate-800;
+
     // --- interaction states (overlays on any surface) -----------------------
-    out property <color> state-hover: text-primary.with-alpha(0.05);
-    out property <color> state-pressed: text-primary.with-alpha(0.09);
+    out property <color> state-hover: accent.with-alpha(0.06);
+    out property <color> state-pressed: accent.with-alpha(0.12);
     out property <color> state-selected: accent-subtle;
-    out property <color> toggle-off: dark ? Swatches.neutral-700 : Swatches.neutral-200;
-    out property <color> toggle-knob: Swatches.neutral-0;
+    out property <color> toggle-off: surface-muted;
+    out property <color> toggle-on: mint;
+    out property <color> toggle-knob: surface;
 
     // --- spacing (4px grid) ------------------------------------------------
     out property <length> space-0-5: 2px;
@@ -71,76 +97,140 @@ export global Theme {
     out property <length> space-8: 32px;
 
     // --- radius ------------------------------------------------------------
-    out property <length> radius-sm: 6px;
-    out property <length> radius-md: 8px;
-    out property <length> radius-lg: 12px;
+    out property <length> radius-sm: 8px;
+    out property <length> radius-md: 12px;
+    out property <length> radius-lg: 16px;
+    out property <length> radius-xl: 24px;
     out property <length> radius-full: 999px;
+    // "Leaf" shape: two opposite corners well rounded (top-left and
+    // bottom-right), the other two nearly square. Used for tags and list
+    // selection instead of plain pills.
+    out property <length> leaf-round: 10px;
+    out property <length> leaf-sharp: 3px;
+    out property <length> leaf-round-lg: 14px;
+    out property <length> leaf-sharp-lg: 4px;
+
+    // --- border & shadow geometry -------------------------------------------
+    // Chunky by default.
+    out property <length> border-width: 2px;
+    out property <length> border-width-emphasis: 2px;
+    // Hairline for separators inside cards.
+    out property <length> hairline: 2px;
+    out property <length> shadow-pop-offset: 4px;
+    out property <length> shadow-pop-hover: 6px;
+    out property <length> shadow-pop-pressed: 2px;
+    out property <length> shadow-card-offset: 6px;
 
     // --- typography --------------------------------------------------------
+    // Outfit for headings (geometric, friendly), Plus Jakarta Sans for body.
+    out property <string> family-heading: "Outfit";
+    out property <string> family-body: "Plus Jakarta Sans";
+    // Major-third scale from 13px.
     out property <length> font-caption: 11px;
     out property <length> font-small: 12px;
     out property <length> font-body: 13px;
-    out property <length> font-title: 15px;
-    out property <length> font-headline: 18px;
-    out property <length> font-display: 22px;
+    out property <length> font-title: 16px;
+    out property <length> font-headline: 20px;
+    out property <length> font-display: 26px;
     out property <int> weight-regular: 400;
     out property <int> weight-medium: 500;
     out property <int> weight-semibold: 600;
+    out property <int> weight-bold: 700;
+    out property <int> weight-extrabold: 800;
+    out property <length> tracking-overline: 0.8px;
+
+    // --- breakpoints ---------------------------------------------------------
+    // The standard min-width scale (as in Tailwind / Bootstrap). Slint has
+    // no media queries; layouts read the flags in `Viewport` instead.
+    out property <length> bp-sm: 640px;
+    out property <length> bp-md: 768px;
+    out property <length> bp-lg: 1024px;
+    out property <length> bp-xl: 1280px;
 
     // --- sizing ------------------------------------------------------------
-    out property <length> control-height: 32px;
-    out property <length> control-height-sm: 26px;
+    // Minimum hit area for anything clickable (44 × 44, WCAG 2.5.5).
+    out property <length> touch-target: 44px;
+    out property <length> control-height: touch-target;
+    // Visual height of small controls; their hit area stays `touch-target`.
+    out property <length> control-height-sm: 32px;
     out property <length> icon-xs: 12px;
     out property <length> icon-sm: 14px;
     out property <length> icon-md: 16px;
     out property <length> icon-lg: 20px;
-    out property <length> icon-xl: 24px;
-    out property <length> tile-xs: 24px;
-    out property <length> tile-sm: 28px;
-    out property <length> tile-md: 34px;
-    out property <length> tile-lg: 48px;
-    out property <length> badge-height: 22px;
-    out property <length> progress-height: 6px;
+    out property <length> icon-xl: 26px;
+    out property <length> tile-xs: 26px;
+    out property <length> tile-sm: 30px;
+    out property <length> tile-md: 36px;
+    out property <length> tile-lg: 60px;
+    out property <length> badge-height: 24px;
+    out property <length> progress-height: 14px;
     out property <length> sidebar-width: 220px;
-    out property <length> app-bar-height: 52px;
-    out property <length> track-row-height: 58px;
-    out property <length> inspector-width: 320px;
-    out property <length> border-width: 1px;
-    out property <length> border-width-emphasis: 2px;
+    out property <length> app-bar-height: 60px;
+    out property <length> track-row-height: 64px;
+    out property <length> inspector-width: 330px;
+    out property <length> pattern-spacing: 22px;
+    // Hard shadow under a selected list row (reserved inside the row).
+    out property <length> shadow-sticker: 3px;
+    // Selectable list row, including its sticker-shadow allowance.
+    out property <length> nav-item-height: touch-target + shadow-sticker;
+    // Height of a scrolling panel (media info) when the page itself scrolls.
+    out property <length> compact-panel-height: 520px;
 
     // --- motion ------------------------------------------------------------
-    out property <duration> duration-fast: 120ms;
-    out property <duration> duration-medium: 200ms;
+    out property <duration> duration-fast: 150ms;
+    out property <duration> duration-medium: 300ms;
+    out property <duration> duration-slow: 450ms;
+    // Smooth glide for things that move between positions (no overshoot);
+    // use with `easing: cubic-bezier(0.22, 1, 0.36, 1)`.
+    out property <duration> duration-glide: 280ms;
+    // Wiggle angle for icon circles and the rotated selection chip.
+    out property <angle> wiggle: 10deg;
 
     // --- tones -------------------------------------------------------------
-    // Foreground for text/icons in a tone; readable on `tone-background`.
+    // Foreground for text/icons in a tone; readable on `tone-background`
+    // and on plain surfaces.
     public pure function tone-foreground(tone: Tone) -> color {
         if (tone == Tone.accent) { return accent-text; }
-        if (tone == Tone.success) { return dark ? Swatches.green-400 : Swatches.green-600; }
-        if (tone == Tone.warning) { return dark ? Swatches.amber-400 : Swatches.amber-600; }
-        if (tone == Tone.danger) { return dark ? Swatches.red-400 : Swatches.red-600; }
-        if (tone == Tone.video) { return dark ? Swatches.blue-400 : Swatches.blue-600; }
-        if (tone == Tone.audio) { return dark ? Swatches.teal-400 : Swatches.teal-600; }
-        if (tone == Tone.subtitle) { return dark ? Swatches.orange-400 : Swatches.orange-600; }
+        if (tone == Tone.success) { return dark ? Swatches.mint-300 : Swatches.mint-700; }
+        if (tone == Tone.warning) { return dark ? Swatches.yellow-300 : Swatches.yellow-700; }
+        if (tone == Tone.danger) { return dark ? Swatches.red-300 : Swatches.red-700; }
+        if (tone == Tone.video) { return dark ? Swatches.blue-300 : Swatches.blue-700; }
+        if (tone == Tone.audio) { return dark ? Swatches.mint-300 : Swatches.mint-700; }
+        if (tone == Tone.subtitle) { return dark ? Swatches.pink-300 : Swatches.pink-700; }
         return text-secondary;
     }
 
-    // Tinted fill for chips, tiles and banners.
+    // Pastel fill for chips and banners.
     public pure function tone-background(tone: Tone) -> color {
-        if (tone == Tone.accent) { return accent-subtle; }
-        if (tone == Tone.success) { return dark ? Swatches.green-800 : Swatches.green-50; }
-        if (tone == Tone.warning) { return dark ? Swatches.amber-800 : Swatches.amber-50; }
-        if (tone == Tone.danger) { return dark ? Swatches.red-800 : Swatches.red-50; }
-        if (tone == Tone.video) { return dark ? Swatches.blue-800 : Swatches.blue-50; }
-        if (tone == Tone.audio) { return dark ? Swatches.teal-800 : Swatches.teal-50; }
-        if (tone == Tone.subtitle) { return dark ? Swatches.orange-800 : Swatches.orange-50; }
+        if (tone == Tone.accent) { return dark ? Swatches.violet-night : Swatches.violet-100; }
+        if (tone == Tone.success) { return dark ? Swatches.mint-night : Swatches.mint-100; }
+        if (tone == Tone.warning) { return dark ? Swatches.yellow-night : Swatches.yellow-100; }
+        if (tone == Tone.danger) { return dark ? Swatches.red-night : Swatches.red-100; }
+        if (tone == Tone.video) { return dark ? Swatches.blue-night : Swatches.blue-100; }
+        if (tone == Tone.audio) { return dark ? Swatches.mint-night : Swatches.mint-100; }
+        if (tone == Tone.subtitle) { return dark ? Swatches.pink-night : Swatches.pink-100; }
         return surface-muted;
     }
 
-    // Saturated colour for dots, bars and borders.
+    // Saturated colour for icon circles, dots, bars and chip outlines.
     public pure function tone-solid(tone: Tone) -> color {
         if (tone == Tone.accent) { return accent; }
-        if (tone == Tone.neutral) { return text-muted; }
-        return tone-foreground(tone);
+        if (tone == Tone.success) { return dark ? Swatches.mint-300 : Swatches.mint-500; }
+        if (tone == Tone.warning) { return dark ? Swatches.yellow-300 : Swatches.yellow-400; }
+        if (tone == Tone.danger) { return dark ? Swatches.red-300 : Swatches.red-500; }
+        if (tone == Tone.video) { return dark ? Swatches.blue-300 : Swatches.blue-500; }
+        if (tone == Tone.audio) { return dark ? Swatches.mint-300 : Swatches.mint-400; }
+        if (tone == Tone.subtitle) { return dark ? Swatches.pink-300 : Swatches.pink-400; }
+        return dark ? Swatches.night-700 : Swatches.slate-300;
+    }
+
+    // Icon colour on a `tone-solid` fill.
+    public pure function tone-on-solid(tone: Tone) -> color {
+        if (dark) { return tone == Tone.neutral ? Swatches.cream : Swatches.night-950; }
+        // White only where it keeps ≥ 3:1 against the fill (WCAG 1.4.11).
+        if (tone == Tone.accent || tone == Tone.video || tone == Tone.danger) {
+            return Swatches.white;
+        }
+        return Swatches.slate-800;
     }
 }

@@ -1,158 +1,261 @@
 // One open file: header with media facts and page switcher, the active
 // page, and the output/save bar.
+//
+// Responsive: from `lg` up the page fills the window between header and
+// output bar; below it the whole document scrolls and each page takes its
+// natural height. Header and output bar restack below `md`.
 
-import { LineEdit } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import {
-    Theme, Tone, Icons, IconTile, Badge, Button, ButtonVariant, ControlSize, SegmentedControl, Card, Banner,
-    ProgressBar, TitleText, CaptionText, OverlineText,
+    TextField, Theme, Tone, Viewport, Icons, IconTile, Badge, Button, ButtonVariant, ControlSize, SegmentedControl,
+    Card, Banner, ProgressBar, AccentMark, DisplayText, CaptionText, OverlineText,
 } from "../components/index.slint";
 import { Bridge, BadgeData } from "../bridge.slint";
 import { ViewState, DocumentPage } from "view_state.slint";
 import { TracksView } from "tracks_view.slint";
 import { MediaInfoView } from "media_info_view.slint";
-import { NamingView } from "naming_view.slint";
+import { NamingView, NamingForm } from "naming_view.slint";
+
+component PageSwitcher inherits SegmentedControl {
+    items: ["Tracks", "Media info", "Naming"];
+    current-index: ViewState.page == DocumentPage.tracks ? 0 : (ViewState.page == DocumentPage.media-info ? 1 : 2);
+    selected(index) => {
+        ViewState.page = index == 0 ? DocumentPage.tracks : (index == 1 ? DocumentPage.media-info : DocumentPage.naming);
+    }
+}
+
+component DocTitle inherits VerticalLayout {
+    alignment: center;
+    spacing: Theme.space-1;
+    horizontal-stretch: 1;
+    min-width: 0;
+
+    DisplayText {
+        text: Bridge.doc-title;
+        font-size: Viewport.sm ? Theme.font-display : Theme.font-headline;
+    }
+    HorizontalLayout {
+        alignment: start;
+        AccentMark { }
+    }
+    CaptionText { text: Bridge.doc-subtitle; overflow: elide; }
+    // Scrolls sideways so a long list of facts never widens the window and
+    // stays reachable on narrow screens.
+    facts := Flickable {
+        min-width: 0;
+        height: Theme.badge-height;
+        viewport-width: max(self.width, facts-row.preferred-width);
+        facts-row := HorizontalLayout {
+            alignment: start;
+            spacing: Theme.space-1-5;
+            for badge in Bridge.doc-badges: Badge { text: badge.text; tone: badge.tone; }
+        }
+    }
+}
 
 component DocumentHeader inherits Card {
-    HorizontalLayout {
-        padding: Theme.space-4;
-        spacing: Theme.space-4;
+    header-hover := TouchArea { }
 
-        VerticalLayout {
-            alignment: center;
-            IconTile { icon: Icons.movie; tone: Tone.accent; size: Theme.tile-lg; icon-size: Theme.icon-xl; }
+    // A layout so the conditional arrangements count toward the
+    // card's height.
+    VerticalLayout {
+        if Viewport.md: HorizontalLayout {
+            padding: Theme.space-5;
+            padding-left: Theme.space-6;
+            spacing: Theme.space-5;
+
+            VerticalLayout {
+                alignment: center;
+                IconTile {
+                    icon: Icons.movie;
+                    tone: Tone.accent;
+                    size: Theme.tile-lg;
+                    icon-size: Theme.icon-xl;
+                    lively: header-hover.has-hover;
+                }
+            }
+            DocTitle { }
+            VerticalLayout {
+                alignment: center;
+                PageSwitcher { }
+            }
         }
-        VerticalLayout {
-            alignment: center;
-            spacing: Theme.space-1;
+
+        // Narrow: title block on top, a full-width page switcher below.
+        if !Viewport.md: VerticalLayout {
+            padding: Theme.space-4;
+            spacing: Theme.space-4;
+            HorizontalLayout {
+                spacing: Theme.space-3;
+                if Viewport.sm: VerticalLayout {
+                    alignment: center;
+                    IconTile { icon: Icons.movie; tone: Tone.accent; size: Theme.tile-md + 8px; }
+                }
+                DocTitle { }
+            }
+            PageSwitcher { fill: true; }
+        }
+    }
+}
+
+// Output file name with its "custom name" state.
+component OutputField inherits VerticalLayout {
+    spacing: Theme.space-1;
+    horizontal-stretch: 1;
+    min-width: 0;
+
+    HorizontalLayout {
+        spacing: Theme.space-2;
+        OverlineText { label: "Output file"; }
+        if !Bridge.output-auto: Badge { text: "Custom name"; }
+        Rectangle { horizontal-stretch: 1; }
+    }
+    HorizontalLayout {
+        spacing: Theme.space-2;
+        TextField {
             horizontal-stretch: 1;
-            TitleText { text: Bridge.doc-title; font-size: Theme.font-headline; }
-            CaptionText { text: Bridge.doc-subtitle; overflow: elide; }
-            // Clipped so a long list of facts never forces the window wider.
-            Rectangle {
-                min-width: 0;
-                height: Theme.badge-height;
-                clip: true;
-                HorizontalLayout {
-                    alignment: start;
-                    spacing: Theme.space-1-5;
-                    for badge in Bridge.doc-badges: Badge { text: badge.text; tone: badge.tone; }
-                }
+            text <=> Bridge.output-name;
+            enabled: !Bridge.busy;
+            accessible-label: "Output file name";
+            edited(text) => { Bridge.output-edited(text); }
+        }
+        if !Bridge.output-auto: Button {
+            text: Viewport.sm ? "Use format" : "";
+            icon: Icons.reset;
+            variant: ButtonVariant.ghost;
+            accessible-name: "Use naming format";
+            clicked => { Bridge.output-reset(); }
+        }
+    }
+}
+
+// Job status: progress while saving, the outcome afterwards.
+component JobStatus inherits VerticalLayout {
+    property <bool> failed: Bridge.active-tab >= 0 && Bridge.tabs[Bridge.active-tab].failed;
+    property <bool> done: Bridge.active-tab >= 0 && Bridge.tabs[Bridge.active-tab].done;
+
+    min-width: 0;
+    alignment: end;
+
+    if Bridge.busy: VerticalLayout {
+        spacing: Theme.space-1-5;
+        padding-bottom: (Theme.control-height - Theme.progress-height) / 2;
+        CaptionText { text: Bridge.status-message; overflow: elide; }
+        ProgressBar { value: Bridge.progress / 100; }
+    }
+    if !Bridge.busy && Bridge.status-message != "": VerticalLayout {
+        spacing: Theme.space-1;
+        padding-bottom: (Theme.control-height - Theme.badge-height) / 2;
+        HorizontalLayout {
+            alignment: start;
+            Badge {
+                text: root.failed ? "Failed" : (root.done ? "Saved" : "Status");
+                tone: root.failed ? Tone.danger : (root.done ? Tone.success : Tone.neutral);
+                icon: root.failed ? Icons.alert : Icons.check;
             }
         }
-        VerticalLayout {
-            alignment: center;
-            SegmentedControl {
-                items: ["Tracks", "Media info", "Naming"];
-                current-index: ViewState.page == DocumentPage.tracks ? 0 : (ViewState.page == DocumentPage.media-info ? 1 : 2);
-                selected(index) => {
-                    ViewState.page = index == 0 ? DocumentPage.tracks : (index == 1 ? DocumentPage.media-info : DocumentPage.naming);
-                }
-            }
+        CaptionText { text: Bridge.status-message; overflow: elide; }
+    }
+}
+
+component SaveActions inherits VerticalLayout {
+    alignment: end;
+    HorizontalLayout {
+        spacing: Theme.space-2;
+        if Bridge.doc-count > 1: Button {
+            text: Viewport.sm ? "Save all" : "";
+            icon: Icons.layers;
+            enabled: !Bridge.any-busy;
+            accessible-name: "Save all";
+            clicked => { Bridge.save-all(); }
+        }
+        if Bridge.busy: Button { text: "Cancel"; clicked => { Bridge.cancel(); } }
+        if !Bridge.busy: Button {
+            text: Bridge.native-dialogs ? "Save as…" : "Save";
+            icon: Icons.save;
+            variant: ButtonVariant.primary;
+            clicked => { Bridge.save(); }
         }
     }
 }
 
 component OutputBar inherits Card {
-    property <bool> failed: Bridge.active-tab >= 0 && Bridge.tabs[Bridge.active-tab].failed;
-    property <bool> done: Bridge.active-tab >= 0 && Bridge.tabs[Bridge.active-tab].done;
+    property <bool> has-status: Bridge.busy || Bridge.status-message != "";
 
-    HorizontalLayout {
-        padding: Theme.space-3;
-        padding-left: Theme.space-4;
-        spacing: Theme.space-3;
+    // A layout so the conditional arrangements count toward the
+    // card's height.
+    VerticalLayout {
+        if Viewport.md: HorizontalLayout {
+            padding: Theme.space-4;
+            padding-left: Theme.space-5;
+            // Room for the primary button's hard shadow.
+            padding-right: Theme.space-5;
+            spacing: Theme.space-4;
 
-        VerticalLayout {
-            alignment: center;
-            IconTile { icon: Icons.file; size: Theme.tile-md; }
-        }
-        VerticalLayout {
-            spacing: Theme.space-1;
-            horizontal-stretch: 1;
-            HorizontalLayout {
-                spacing: Theme.space-2;
-                OverlineText { text: "Output file"; }
-                if !Bridge.output-auto: Badge { text: "Custom name"; }
-                Rectangle { horizontal-stretch: 1; }
+            VerticalLayout {
+                alignment: center;
+                IconTile { icon: Icons.file; size: Theme.tile-md; }
             }
-            HorizontalLayout {
-                spacing: Theme.space-2;
-                LineEdit {
-                    horizontal-stretch: 1;
-                    text <=> Bridge.output-name;
-                    enabled: !Bridge.busy;
-                    edited(text) => { Bridge.output-edited(text); }
-                }
-                if !Bridge.output-auto: Button {
-                    text: "Use format";
-                    icon: Icons.reset;
-                    variant: ButtonVariant.ghost;
-                    clicked => { Bridge.output-reset(); }
-                }
-            }
+            OutputField { }
+            if root.has-status: JobStatus { width: Viewport.lg ? 240px : 180px; }
+            SaveActions { }
         }
 
-        // Job status: progress while saving, the outcome afterwards.
-        if Bridge.busy: VerticalLayout {
-            width: 200px;
-            alignment: end;
-            spacing: Theme.space-1-5;
-            padding-bottom: (Theme.control-height - Theme.progress-height) / 2;
-            CaptionText { text: Bridge.status-message; overflow: elide; }
-            ProgressBar { value: Bridge.progress / 100; }
-        }
-        if !Bridge.busy && Bridge.status-message != "": VerticalLayout {
-            max-width: 280px;
-            alignment: end;
-            spacing: Theme.space-1;
-            padding-bottom: (Theme.control-height - Theme.badge-height) / 2;
+        // Narrow: the name gets the full width; status and actions share a row.
+        if !Viewport.md: VerticalLayout {
+            padding: Theme.space-4;
+            padding-right: Theme.space-4 + Theme.shadow-pop-offset;
+            spacing: Theme.space-3;
+            OutputField { }
             HorizontalLayout {
-                alignment: start;
-                Badge {
-                    text: root.failed ? "Failed" : (root.done ? "Saved" : "Status");
-                    tone: root.failed ? Tone.danger : (root.done ? Tone.success : Tone.neutral);
-                    icon: root.failed ? Icons.alert : Icons.check;
-                }
-            }
-            CaptionText { text: Bridge.status-message; overflow: elide; }
-        }
-
-        VerticalLayout {
-            alignment: end;
-            HorizontalLayout {
-                spacing: Theme.space-2;
-                if Bridge.doc-count > 1: Button {
-                    text: "Save all";
-                    icon: Icons.layers;
-                    enabled: !Bridge.any-busy;
-                    clicked => { Bridge.save-all(); }
-                }
-                if Bridge.busy: Button { text: "Cancel"; clicked => { Bridge.cancel(); } }
-                if !Bridge.busy: Button {
-                    text: Bridge.native-dialogs ? "Save as…" : "Save";
-                    icon: Icons.save;
-                    variant: ButtonVariant.primary;
-                    clicked => { Bridge.save(); }
-                }
+                spacing: Theme.space-3;
+                if root.has-status: JobStatus { horizontal-stretch: 1; }
+                if !root.has-status: Rectangle { horizontal-stretch: 1; }
+                SaveActions { }
             }
         }
     }
 }
 
-export component DocumentView inherits VerticalLayout {
-    // A new file starts with its first track selected.
-    property <int> active-tab: Bridge.active-tab;
-    changed active-tab => { ViewState.selected-track = 0; }
+// Header, warnings, the active page and the output bar. `fill` stretches
+// the page to the free height; otherwise pages take their natural height.
+component DocumentBody inherits VerticalLayout {
+    in property <bool> fill;
 
-    padding: Theme.space-5;
+    padding: Viewport.gutter;
     spacing: Theme.space-4;
 
     DocumentHeader { }
 
     for warning in Bridge.warnings: Banner { text: warning; tone: Tone.warning; }
 
-    if ViewState.page == DocumentPage.tracks: TracksView { vertical-stretch: 1; }
-    if ViewState.page == DocumentPage.media-info: MediaInfoView { vertical-stretch: 1; }
-    if ViewState.page == DocumentPage.naming: NamingView { vertical-stretch: 1; }
+    if ViewState.page == DocumentPage.tracks: TracksView { vertical-stretch: root.fill ? 1 : 0; }
+    if ViewState.page == DocumentPage.media-info && root.fill: MediaInfoView { vertical-stretch: 1; }
+    // Its lists scroll internally, so it gets a fixed height in a scrolling page.
+    if ViewState.page == DocumentPage.media-info && !root.fill: MediaInfoView { height: Theme.compact-panel-height; }
+    if ViewState.page == DocumentPage.naming && root.fill: NamingView { vertical-stretch: 1; }
+    if ViewState.page == DocumentPage.naming && !root.fill: NamingForm { }
 
     OutputBar { }
+}
+
+export component DocumentView inherits Rectangle {
+    // A new file starts with its first track selected.
+    property <int> active-tab: Bridge.active-tab;
+    changed active-tab => { ViewState.selected-track = 0; }
+
+    if Viewport.lg: DocumentBody { fill: true; }
+
+    // Below `lg` the document scrolls as one page.
+    if !Viewport.lg: page := ScrollView {
+        // Pinned to the top and as tall as its content needs: with wrapped
+        // text the minimum can exceed the preferred height.
+        viewport-height: body.height;
+        body := DocumentBody {
+            y: 0;
+            width: page.visible-width;
+            height: max(self.min-height, self.preferred-height);
+            fill: false;
+        }
+    }
 }

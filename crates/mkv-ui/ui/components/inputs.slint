@@ -1,0 +1,307 @@
+// Themed text inputs and select. The std-widgets equivalents draw their own
+// frames, which can't follow the design, so these wrap the primitive
+// `TextInput` and mirror the std API (`text`, `placeholder-text`,
+// `edited`, `current-index`, `selected`, ...) so views can swap them in.
+
+import { ScrollView, ListView } from "std-widgets.slint";
+import { Theme } from "../theme/theme.slint";
+import { Icons } from "../theme/icons.slint";
+import { Icon } from "icon.slint";
+
+// Outlined input frame: rests in a soft outline and, when focused, turns
+// violet with a hard violet shadow.
+component FieldFrame inherits Rectangle {
+    in property <bool> focused;
+    in property <bool> hovered;
+    in property <bool> enabled: true;
+
+    border-radius: Theme.radius-md;
+    border-width: Theme.border-width;
+    border-color: focused ? Theme.accent : (hovered && enabled ? Theme.ink : Theme.border-strong);
+    background: enabled ? Theme.surface : Theme.surface-muted;
+    drop-shadow-blur: 0;
+    drop-shadow-offset-x: focused ? Theme.shadow-pop-offset : 0;
+    drop-shadow-offset-y: self.drop-shadow-offset-x;
+    drop-shadow-color: Theme.accent;
+    animate border-color { duration: Theme.duration-fast; }
+    animate drop-shadow-offset-x { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+}
+
+// Single-line text field (replaces `LineEdit`).
+export component TextField {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <bool> enabled <=> input.enabled;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+    callback accepted(string);
+
+    min-width: 80px;
+    height: Theme.control-height;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-label: placeholder-text;
+    accessible-value: text;
+
+    FieldFrame {
+        focused: input.has-focus;
+        hovered: touch.has-hover;
+        enabled: root.enabled;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        enabled: root.enabled;
+        clicked => { input.focus(); }
+    }
+
+    Rectangle {
+        x: Theme.space-3;
+        width: parent.width - 2 * Theme.space-3;
+        clip: true;
+
+        if root.text == "": Text {
+            x: 0;
+            width: parent.width;
+            height: parent.height;
+            text: root.placeholder-text;
+            color: Theme.text-muted;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        // Scrolls horizontally to keep the cursor in view (as `LineEdit`
+        // does).
+        input := TextInput {
+            property <length> computed-x;
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            height: parent.height;
+            single-line: true;
+            vertical-alignment: center;
+            font-size: Theme.font-body;
+            font-weight: Theme.weight-medium;
+            color: root.enabled ? Theme.text-primary : Theme.text-disabled;
+            selection-background-color: Theme.accent.with-alpha(0.3);
+            selection-foreground-color: Theme.text-primary;
+            edited => { root.edited(self.text); }
+            accepted => { root.accepted(self.text); }
+            cursor-position-changed(cpos) => {
+                if (cpos.x + self.computed-x < 0) {
+                    self.computed-x = -cpos.x;
+                } else if (cpos.x + self.computed-x > parent.width - self.text-cursor-width) {
+                    self.computed-x = parent.width - cpos.x - self.text-cursor-width;
+                }
+            }
+        }
+    }
+}
+
+// Multi-line text field (replaces `TextEdit`). Scrolls vertically; wraps
+// words unless `wrap` is `no-wrap`, in which case it scrolls horizontally.
+export component TextArea {
+    in-out property <string> text <=> input.text;
+    in property <bool> enabled <=> input.enabled;
+    in property <TextWrap> wrap: TextWrap.word-wrap;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+
+    min-height: 64px;
+    horizontal-stretch: 1;
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-value: text;
+
+    FieldFrame {
+        focused: input.has-focus;
+        hovered: touch.has-hover;
+        enabled: root.enabled;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        enabled: root.enabled;
+        clicked => { input.focus(); }
+    }
+
+    Rectangle {
+        x: Theme.border-width;
+        y: Theme.border-width;
+        width: parent.width - 2 * Theme.border-width;
+        height: parent.height - 2 * Theme.border-width;
+        border-radius: Theme.radius-md - Theme.border-width;
+        clip: true;
+
+        scroll := ScrollView {
+            input := TextInput {
+                x: Theme.space-3 - Theme.border-width;
+                y: Theme.space-2;
+                width: root.wrap == TextWrap.no-wrap
+                    ? max(scroll.visible-width - 2 * self.x, self.preferred-width)
+                    : scroll.visible-width - 2 * self.x;
+                height: max(scroll.visible-height - 2 * self.y, self.preferred-height);
+                single-line: false;
+                wrap: root.wrap;
+                font-size: Theme.font-body;
+                color: root.enabled ? Theme.text-primary : Theme.text-disabled;
+                selection-background-color: Theme.accent.with-alpha(0.3);
+                selection-foreground-color: Theme.text-primary;
+                edited => { root.edited(self.text); }
+                // Keep the cursor line in view.
+                cursor-position-changed(cpos) => {
+                    if (cpos.y + self.y + scroll.viewport-y < 0) {
+                        scroll.viewport-y = -cpos.y - self.y;
+                    } else if (cpos.y + self.y + self.font-size * 1.5 + scroll.viewport-y > scroll.visible-height) {
+                        scroll.viewport-y = scroll.visible-height - cpos.y - self.y - self.font-size * 1.5;
+                    }
+                    if (cpos.x + self.x + scroll.viewport-x < 0) {
+                        scroll.viewport-x = -cpos.x - self.x;
+                    } else if (cpos.x + self.x + scroll.viewport-x > scroll.visible-width - self.text-cursor-width) {
+                        scroll.viewport-x = scroll.visible-width - cpos.x - self.x - self.text-cursor-width;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Drop-down picker (replaces `ComboBox`): an outlined field with a chevron
+// that opens a sticker-style list. Arrow keys change the value directly.
+export component Select {
+    in property <[string]> model;
+    in-out property <int> current-index: 0;
+    out property <string> current-value: current-index >= 0 && current-index < model.length ? model[current-index] : "";
+    in property <bool> enabled: true;
+    callback selected(string);
+
+    // Each option is a full touch target.
+    property <length> row-height: Theme.touch-target;
+
+    function choose(index: int) {
+        if (index < 0 || index >= root.model.length || index == root.current-index) { return; }
+        root.current-index = index;
+        root.selected(root.model[index]);
+    }
+
+    min-width: 120px;
+    height: Theme.control-height;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    opacity: enabled ? 1 : 0.45;
+    forward-focus: focus;
+    accessible-role: combobox;
+    accessible-value: current-value;
+    accessible-expanded: false;
+    accessible-action-default => { if (root.enabled) { popup.show(); } }
+
+    FieldFrame {
+        focused: focus.has-focus;
+        hovered: touch.has-hover;
+        enabled: root.enabled;
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.UpArrow) {
+                root.choose(root.current-index - 1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.choose(root.current-index + 1);
+                return accept;
+            }
+            if (event.text == " " || event.text == Key.Return) {
+                popup.show();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    // Above the focus scope so clicks open the list.
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            focus.focus();
+            popup.show();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.space-3;
+        padding-right: Theme.space-2 + Theme.space-0-5;
+        spacing: Theme.space-2;
+        Text {
+            text: root.current-value;
+            horizontal-stretch: 1;
+            overflow: elide;
+            vertical-alignment: center;
+            font-size: Theme.font-body;
+            font-weight: Theme.weight-medium;
+            color: Theme.text-primary;
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon { source: Icons.chevron-down; size: Theme.icon-md; colorize: Theme.text-primary; }
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + Theme.space-1-5;
+        width: root.width;
+        height: min(root.model.length * root.row-height, 280px) + 2 * Theme.space-1-5 + 2 * Theme.border-width;
+
+        Rectangle {
+            border-radius: Theme.radius-md;
+            border-width: Theme.border-width;
+            border-color: Theme.ink;
+            background: Theme.surface;
+            drop-shadow-blur: 0;
+            drop-shadow-offset-x: Theme.shadow-pop-offset;
+            drop-shadow-offset-y: Theme.shadow-pop-offset;
+            drop-shadow-color: Theme.shadow-pop;
+
+            ListView {
+                x: Theme.border-width + Theme.space-1-5;
+                y: Theme.border-width + Theme.space-1-5;
+                width: parent.width - 2 * self.x;
+                height: parent.height - 2 * self.y;
+
+                for item[i] in root.model: option := Rectangle {
+                    property <bool> current: i == root.current-index;
+                    height: root.row-height;
+                    border-radius: Theme.radius-sm;
+                    background: current ? Theme.accent : (option-touch.has-hover ? Theme.state-hover : transparent);
+                    accessible-role: list-item;
+                    accessible-label: item;
+                    accessible-item-selected: current;
+
+                    option-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.choose(i);
+                            popup.close();
+                        }
+                    }
+                    Text {
+                        x: Theme.space-2 + Theme.space-0-5;
+                        width: parent.width - 2 * self.x;
+                        height: parent.height;
+                        text: item;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        font-size: Theme.font-body;
+                        font-weight: option.current ? Theme.weight-bold : Theme.weight-medium;
+                        color: option.current ? Theme.on-accent : Theme.text-primary;
+                    }
+                }
+            }
+        }
+    }
+}

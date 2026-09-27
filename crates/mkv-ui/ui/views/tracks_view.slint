@@ -1,34 +1,43 @@
 // Tracks page: profile toolbar, the track list (keep toggle, type, summary
 // and active flags per row) and the inspector for the selected track.
+//
+// Responsive: from `lg` up the list and inspector sit side by side and
+// fill the page; below it they stack at their natural heights (the page
+// scrolls). The toolbar wraps onto two rows below `lg`, and rows drop the
+// position chip and inline reorder buttons below `sm` (the inspector still
+// has Move up / Move down).
 
-import { ComboBox, ListView } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
 import {
-    Theme, Tone, Icons, IconTile, Badge, Toggle, Button, IconButton, ButtonVariant, ControlSize, Card, Divider,
-    TitleText, LabelText, CaptionText,
+    Select, Theme, Tone, Viewport, Icons, IconTile, Badge, Toggle, Button, IconButton, ButtonVariant, ControlSize, Card,
+    Divider, TitleText, LabelText, CaptionText, OverlineText,
 } from "../components/index.slint";
 import { Bridge, TrackRowData } from "../bridge.slint";
 import { ViewState, TrackStyle } from "view_state.slint";
 import { TrackInspector } from "track_inspector.slint";
 
-component ProfileToolbar inherits HorizontalLayout {
-    spacing: Theme.space-2;
-
-    CaptionText { text: "Profile"; }
-    ComboBox {
-        width: 170px;
+component ProfileField inherits VerticalLayout {
+    spacing: Theme.space-1-5;
+    OverlineText { label: "Profile"; }
+    Select {
         model: Bridge.profile-names;
         current-index <=> Bridge.profile-index;
         selected => { Bridge.profile-selected(self.current-index); }
     }
-    Rectangle { width: Theme.space-2; }
-    CaptionText { text: "Original language"; }
-    ComboBox {
-        width: 200px;
+}
+
+component LanguageField inherits VerticalLayout {
+    spacing: Theme.space-1-5;
+    OverlineText { label: "Original language"; }
+    Select {
         model: Bridge.language-labels;
         current-index <=> Bridge.language-index;
         selected => { Bridge.language-selected(self.current-index); }
     }
-    Rectangle { width: Theme.space-2; }
+}
+
+component ProfileActions inherits HorizontalLayout {
+    spacing: Theme.space-2;
     Button {
         text: "Apply profile";
         icon: Icons.wand;
@@ -36,19 +45,47 @@ component ProfileToolbar inherits HorizontalLayout {
         clicked => { Bridge.apply-profile(); }
     }
     Button {
-        text: "Reset";
+        text: Viewport.sm ? "Reset" : "";
         icon: Icons.reset;
         variant: ButtonVariant.ghost;
         enabled: !Bridge.busy;
+        accessible-name: "Reset tracks";
         clicked => { Bridge.reset-tracks(); }
     }
     Rectangle { horizontal-stretch: 1; }
     if Bridge.doc-count > 1: Button {
-        text: "Apply to all";
+        text: Viewport.sm ? "Apply to all" : "";
         icon: Icons.copy-all;
         variant: ButtonVariant.ghost;
         enabled: !Bridge.any-busy;
+        accessible-name: "Apply to all files";
         clicked => { Bridge.apply-all(); }
+    }
+}
+
+component ProfileToolbar inherits VerticalLayout {
+    // One row from `lg` up.
+    if Viewport.lg: HorizontalLayout {
+        spacing: Theme.space-4;
+        ProfileField { width: 200px; }
+        LanguageField { width: 210px; }
+        VerticalLayout {
+            alignment: end;
+            horizontal-stretch: 1;
+            ProfileActions { }
+        }
+    }
+    // Pickers on one row (stacked below `sm`), actions below.
+    if !Viewport.lg: VerticalLayout {
+        spacing: Theme.space-3;
+        if Viewport.sm: HorizontalLayout {
+            spacing: Theme.space-3;
+            ProfileField { horizontal-stretch: 1; }
+            LanguageField { horizontal-stretch: 1; }
+        }
+        if !Viewport.sm: ProfileField { }
+        if !Viewport.sm: LanguageField { }
+        ProfileActions { }
     }
 }
 
@@ -56,6 +93,8 @@ component TrackRow inherits Rectangle {
     in property <TrackRowData> track;
     in property <int> index;
     in property <bool> selected;
+    // The list has keyboard focus: outline the selected row.
+    in property <bool> list-focused;
     callback select();
 
     property <bool> show-actions: touch.has-hover || selected;
@@ -75,10 +114,31 @@ component TrackRow inherits Rectangle {
         clicked => { root.select(); }
     }
 
+    // Keyboard focus indicator on the selected row.
+    Rectangle {
+        x: Theme.space-0-5;
+        y: Theme.space-0-5;
+        width: parent.width - 2 * Theme.space-0-5;
+        height: parent.height - 2 * Theme.space-0-5;
+        border-radius: Theme.radius-sm;
+        border-width: root.selected && root.list-focused ? 2px : 0;
+        border-color: Theme.focus-ring;
+    }
+
+    // Selection marker: a violet pill hugging the left edge.
+    Rectangle {
+        x: Theme.space-1-5;
+        width: 6px;
+        height: root.selected ? 28px : 0;
+        border-radius: self.width / 2;
+        background: Theme.accent;
+        animate height { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+    }
+
     HorizontalLayout {
-        padding-left: Theme.space-4;
+        padding-left: Viewport.sm ? Theme.space-5 : Theme.space-4;
         padding-right: Theme.space-2;
-        spacing: Theme.space-3;
+        spacing: Viewport.sm ? Theme.space-3 : Theme.space-2;
 
         VerticalLayout {
             alignment: center;
@@ -91,18 +151,43 @@ component TrackRow inherits Rectangle {
 
         // Everything but the keep toggle recedes when a track is dropped.
         HorizontalLayout {
-            spacing: Theme.space-3;
+            spacing: Viewport.sm ? Theme.space-3 : Theme.space-2;
             horizontal-stretch: 1;
+            min-width: 0;
             opacity: root.track.keep ? 1 : 0.45;
 
+            // Position in the output file; tilts when selected.
+            if Viewport.sm: VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: Theme.radius-sm;
+                    background: root.selected ? Theme.accent : Theme.surface-muted;
+                    transform-rotation: root.selected ? -6deg : 0deg;
+                    animate transform-rotation { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+                    Text {
+                        text: root.index + 1;
+                        font-family: Theme.family-heading;
+                        font-size: Theme.font-body;
+                        font-weight: Theme.weight-extrabold;
+                        color: root.selected ? Theme.on-accent : Theme.text-secondary;
+                    }
+                }
+            }
             VerticalLayout {
                 alignment: center;
-                IconTile { icon: TrackStyle.icon(root.track.kind); tone: TrackStyle.tone(root.track.kind); }
+                IconTile {
+                    icon: TrackStyle.icon(root.track.kind);
+                    tone: TrackStyle.tone(root.track.kind);
+                    lively: touch.has-hover;
+                }
             }
             VerticalLayout {
                 alignment: center;
                 spacing: Theme.space-0-5;
                 horizontal-stretch: 1;
+                min-width: 0;
                 LabelText {
                     text: root.track.name != "" ? root.track.name : TrackStyle.label(root.track.kind) + " " + root.track.ordinal;
                     color: root.track.name != "" ? Theme.text-primary : Theme.text-secondary;
@@ -110,22 +195,31 @@ component TrackRow inherits Rectangle {
                 }
                 CaptionText { text: root.summary; overflow: elide; }
             }
-            HorizontalLayout {
+            // Flags: clipped rather than widening the row when space runs
+            // out; below `sm` they live in the inspector only.
+            if Viewport.sm: Rectangle {
+                min-width: 0;
+                max-width: flags.preferred-width;
+                horizontal-stretch: 1;
+                clip: true;
+                flags := HorizontalLayout {
                 spacing: Theme.space-1;
                 alignment: end;
-                if !root.track.keep: VerticalLayout { alignment: center; Badge { text: "Dropped"; } }
+                if !root.track.keep: VerticalLayout { alignment: center; Badge { text: "Dropped"; tone: Tone.danger; } }
                 if root.track.is-default: VerticalLayout { alignment: center; Badge { text: "Default"; tone: Tone.accent; } }
                 if root.track.is-forced: VerticalLayout { alignment: center; Badge { text: "Forced"; tone: Tone.warning; } }
                 if root.track.is-original: VerticalLayout { alignment: center; Badge { text: "Original"; tone: Tone.success; } }
                 if root.track.is-hi: VerticalLayout { alignment: center; Badge { text: "SDH"; } }
                 if root.track.is-vi: VerticalLayout { alignment: center; Badge { text: "AD"; } }
                 if root.track.is-commentary: VerticalLayout { alignment: center; Badge { text: "Commentary"; } }
+                }
             }
         }
 
         // Reorder within the track's type; hidden (but space-holding) until
-        // the row is hovered or selected to keep the list calm.
-        HorizontalLayout {
+        // the row is hovered or selected to keep the list calm. Below `sm`
+        // reordering is done from the inspector.
+        if Viewport.sm: HorizontalLayout {
             visible: root.show-actions;
             VerticalLayout {
                 alignment: center;
@@ -157,22 +251,50 @@ component TrackRow inherits Rectangle {
     }
 
     Divider {
-        x: Theme.space-4;
         y: parent.height - self.height;
-        width: parent.width - Theme.space-4;
     }
 }
 
 component TrackList inherits Card {
+    // Scroll inside the card, or take the rows' natural height (stacked
+    // layout, where the page scrolls instead).
+    in property <bool> scrolls: true;
+
     VerticalLayout {
         HorizontalLayout {
-            padding-left: Theme.space-4;
+            padding-left: Viewport.sm ? Theme.space-5 : Theme.space-4;
             padding-right: Theme.space-4;
-            padding-top: Theme.space-3;
-            padding-bottom: Theme.space-3;
-            spacing: Theme.space-2;
-            TitleText { text: "Tracks"; vertical-alignment: center; }
-            CaptionText { text: Bridge.tracks.length; }
+            padding-top: Theme.space-4;
+            padding-bottom: Theme.space-4;
+            spacing: Theme.space-2 + Theme.space-0-5;
+            TitleText { text: "Tracks"; font-size: Theme.font-headline; vertical-alignment: center; }
+            // Count sticker.
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    min-width: 26px;
+                    height: 26px;
+                    border-radius: self.height / 2;
+                    border-width: Theme.border-width;
+                    border-color: Theme.ink;
+                    background: Theme.pink;
+                    accessible-role: text;
+                    accessible-label: Bridge.tracks.length + " tracks";
+                    HorizontalLayout {
+                        padding-left: Theme.space-1-5;
+                        padding-right: Theme.space-1-5;
+                        Text {
+                            text: Bridge.tracks.length;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            font-family: Theme.family-heading;
+                            font-size: Theme.font-body;
+                            font-weight: Theme.weight-extrabold;
+                            color: Theme.on-confetti;
+                        }
+                    }
+                }
+            }
             Rectangle { horizontal-stretch: 1; }
             if Bridge.change-count > 0: VerticalLayout {
                 alignment: center;
@@ -184,7 +306,8 @@ component TrackList inherits Card {
         }
         Divider { }
 
-        // Arrow keys move the selection once the list has focus.
+        // Keyboard: ↑/↓ move the selection, Space keeps or drops the
+        // selected track.
         list-focus := FocusScope {
             vertical-stretch: 1;
             key-pressed(event) => {
@@ -196,17 +319,38 @@ component TrackList inherits Card {
                     ViewState.selected-track += 1;
                     return accept;
                 }
+                if (event.text == " " && ViewState.selected-track >= 0 && ViewState.selected-track < Bridge.tracks.length) {
+                    Bridge.set-keep(ViewState.selected-track, !Bridge.tracks[ViewState.selected-track].keep);
+                    return accept;
+                }
                 reject
             }
 
-            ListView {
-                for row[i] in Bridge.tracks: TrackRow {
-                    track: row;
-                    index: i;
-                    selected: i == ViewState.selected-track;
-                    select => {
-                        ViewState.selected-track = i;
-                        list-focus.focus();
+            // A layout so the conditional children count toward the
+            // card's height.
+            VerticalLayout {
+                if root.scrolls: ListView {
+                    for row[i] in Bridge.tracks: TrackRow {
+                        track: row;
+                        index: i;
+                        selected: i == ViewState.selected-track;
+                        list-focused: list-focus.has-focus;
+                        select => {
+                            ViewState.selected-track = i;
+                            list-focus.focus();
+                        }
+                    }
+                }
+                if !root.scrolls: VerticalLayout {
+                    for row[i] in Bridge.tracks: TrackRow {
+                        track: row;
+                        index: i;
+                        selected: i == ViewState.selected-track;
+                        list-focused: list-focus.has-focus;
+                        select => {
+                            ViewState.selected-track = i;
+                            list-focus.focus();
+                        }
                     }
                 }
             }
@@ -215,13 +359,18 @@ component TrackList inherits Card {
 }
 
 export component TracksView inherits VerticalLayout {
-    spacing: Theme.space-3;
+    spacing: Theme.space-4;
 
     ProfileToolbar { }
-    HorizontalLayout {
-        spacing: Theme.space-4;
+    if Viewport.lg: HorizontalLayout {
+        spacing: Theme.space-5;
         vertical-stretch: 1;
         TrackList { horizontal-stretch: 1; }
-        TrackInspector { width: Theme.inspector-width; }
+        TrackInspector { width: Theme.inspector-width; featured: true; }
+    }
+    if !Viewport.lg: VerticalLayout {
+        spacing: Theme.space-5;
+        TrackList { scrolls: false; }
+        TrackInspector { scrolls: false; featured: true; }
     }
 }

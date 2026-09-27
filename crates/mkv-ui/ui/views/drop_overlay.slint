@@ -2,7 +2,7 @@
 // (desktop). Tells the user up front whether the drop will open anything:
 // only MKV video is accepted.
 
-import { Theme, Tone, Icons, IconTile, TitleText, SecondaryText } from "../components/index.slint";
+import { Theme, Tone, Viewport, Icons, IconTile, TitleText, SecondaryText, Confetti, ConfettiShape } from "../components/index.slint";
 import { Bridge, DropState } from "../bridge.slint";
 
 export component DropOverlay inherits Rectangle {
@@ -17,37 +17,52 @@ export component DropOverlay inherits Rectangle {
     TouchArea { }
 
     Rectangle {
-        x: Theme.space-5;
-        y: Theme.space-5;
-        width: parent.width - 2 * Theme.space-5;
-        height: parent.height - 2 * Theme.space-5;
-        border-radius: Theme.radius-lg;
+        x: Viewport.gutter;
+        y: Viewport.gutter;
+        width: parent.width - 2 * Viewport.gutter;
+        height: parent.height - 2 * Viewport.gutter;
+        border-radius: Theme.radius-xl;
         border-width: Theme.border-width-emphasis;
-        border-color: Theme.tone-solid(root.tone);
-        background: Theme.tone-background(root.tone).with-alpha(0.5);
+        border-color: Theme.ink;
+        background: Theme.tone-background(root.tone);
+        drop-shadow-blur: 0;
+        drop-shadow-offset-x: Theme.shadow-card-offset;
+        drop-shadow-offset-y: Theme.shadow-card-offset;
+        drop-shadow-color: Theme.tone-solid(root.tone);
+
+        // Confetti celebrating (or not) the drop.
+        if root.accepting: Confetti { x: parent.width * 0.18; y: parent.height * 0.22; size: 44px; color: Theme.yellow; }
+        if root.accepting: Confetti { x: parent.width * 0.78; y: parent.height * 0.26; size: 34px; shape: ConfettiShape.triangle; color: Theme.pink; angle: 14deg; }
+        if root.accepting: Confetti { x: parent.width * 0.72; y: parent.height * 0.7; size: 30px; shape: ConfettiShape.square; color: Theme.mint; angle: -18deg; }
+        if root.accepting: Confetti { x: parent.width * 0.22; y: parent.height * 0.7; size: 36px; shape: ConfettiShape.ring; color: Theme.accent; }
 
         VerticalLayout {
             alignment: center;
             spacing: Theme.space-3;
+            padding-left: Theme.space-4;
+            padding-right: Theme.space-4;
 
             HorizontalLayout {
                 alignment: center;
                 IconTile {
                     icon: root.accepting ? Icons.file : Icons.alert;
                     tone: root.tone;
-                    size: Theme.tile-lg;
-                    icon-size: Theme.icon-xl;
+                    size: 84px;
+                    icon-size: 38px;
+                    lively: root.accepting;
                 }
             }
             title := TitleText {
                 horizontal-alignment: center;
-                font-size: Theme.font-headline;
+                wrap: word-wrap;
+                font-size: Theme.font-display;
                 text: !root.accepting
                     ? "Only MKV video files can be opened"
                     : (Bridge.drop-count == 1 ? "Drop to open 1 MKV file" : "Drop to open " + Bridge.drop-count + " MKV files");
             }
             SecondaryText {
                 horizontal-alignment: center;
+                wrap: word-wrap;
                 text: root.accepting
                     ? "Each file opens in its own tab. Other files in the drop are skipped."
                     : "Other formats can't be edited. Convert them to Matroska (.mkv) first.";

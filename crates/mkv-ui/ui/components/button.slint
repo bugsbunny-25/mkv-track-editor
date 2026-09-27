@@ -3,8 +3,11 @@ import { Icon } from "icon.slint";
 
 // Visual weight. Use at most one `primary` per view.
 export enum ButtonVariant {
+    // Candy button: violet pill, hard ink shadow, icon in a round bubble.
     primary,
+    // Outlined pill that fills with yellow on hover.
     secondary,
+    // Borderless until hovered.
     ghost,
     danger,
 }
@@ -14,8 +17,9 @@ export enum ControlSize {
     medium,
 }
 
-// Button with an optional leading icon. Icon-only when `text` is empty —
-// then set `accessible-name` so screen readers can announce it.
+// Pill button with an optional icon. Icon-only when `text` is empty — then
+// set `accessible-name` so screen readers can announce it. Whatever its
+// visual size, the hit area is at least `Theme.touch-target` square.
 export component Button {
     in property <string> text;
     in property <image> icon;
@@ -24,32 +28,54 @@ export component Button {
     in property <bool> enabled: true;
     // Latched look, e.g. the active settings toggle or a selected filter.
     in property <bool> selected;
+    // Sitting on a confetti fill (e.g. the yellow active tab): use the dark
+    // on-confetti ink for text and icons.
+    in property <bool> on-confetti;
     in property <string> accessible-name: text;
     callback clicked();
 
     property <bool> icon-only: text == "";
     property <bool> has-icon: icon.width > 0;
-    property <length> control-height: size == ControlSize.small ? Theme.control-height-sm : Theme.control-height;
+    property <bool> primary: variant == ButtonVariant.primary;
+    // The primary button carries its icon in a trailing bubble.
+    property <bool> bubble: primary && has-icon && !icon-only;
+    // Height of the visible pill; the button itself is always a full touch
+    // target tall, with the pill centred in it.
+    property <length> visual-height: size == ControlSize.small ? Theme.control-height-sm : Theme.control-height;
     property <bool> hovered: touch.has-hover && enabled;
     property <bool> pressed: touch.pressed && enabled;
 
+    // Hard-shadow depth of the primary button: lifts on hover, presses in.
+    property <length> pop: !primary ? 0 : (pressed ? Theme.shadow-pop-pressed : (hovered ? Theme.shadow-pop-hover : Theme.shadow-pop-offset));
+    // How far the face (and its content) moves against the shadow.
+    property <length> lift: primary ? Theme.shadow-pop-offset - pop : 0;
+
     property <color> foreground: {
-        if (variant == ButtonVariant.primary) { return Theme.on-accent; }
+        if (primary) { return Theme.on-accent; }
+        if (on-confetti) { return Theme.on-confetti; }
         if (variant == ButtonVariant.danger) { return Theme.tone-foreground(Tone.danger); }
         if (selected) { return Theme.accent-text; }
+        if (variant == ButtonVariant.secondary && (hovered || pressed)) { return Theme.on-confetti; }
         if (variant == ButtonVariant.ghost && !hovered) { return Theme.text-secondary; }
         return Theme.text-primary;
     }
     property <color> fill: {
-        if (variant == ButtonVariant.primary) { return pressed || hovered ? Theme.accent-hover : Theme.accent; }
+        if (primary) { return hovered || pressed ? Theme.accent-hover : Theme.accent; }
         if (selected) { return Theme.state-selected; }
+        if (variant == ButtonVariant.danger) { return hovered || pressed ? Theme.tone-background(Tone.danger) : Theme.surface; }
+        if (variant == ButtonVariant.secondary) { return hovered || pressed ? Theme.yellow : Theme.surface; }
         if (pressed) { return Theme.state-pressed; }
-        if (hovered) { return variant == ButtonVariant.danger ? Theme.tone-background(Tone.danger) : Theme.state-hover; }
-        return variant == ButtonVariant.secondary ? Theme.surface : transparent;
+        return hovered && icon-only ? Theme.surface-muted : transparent;
+    }
+    property <color> outline: {
+        if (selected) { return Theme.accent; }
+        if (variant == ButtonVariant.danger) { return Theme.tone-solid(Tone.danger); }
+        if (variant == ButtonVariant.ghost) { return hovered ? (on-confetti ? Theme.on-confetti : Theme.ink) : transparent; }
+        return Theme.ink;
     }
 
-    min-width: control-height;
-    height: control-height;
+    min-width: Theme.touch-target;
+    height: Theme.touch-target;
     horizontal-stretch: 0;
     opacity: enabled ? 1 : 0.45;
     forward-focus: focus;
@@ -58,22 +84,81 @@ export component Button {
     accessible-label: accessible-name;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
-    background := Rectangle {
-        border-radius: Theme.radius-md;
-        background: root.fill;
-        border-width: root.variant == ButtonVariant.secondary && !root.selected ? Theme.border-width : 0;
-        border-color: Theme.border-strong;
-        animate background { duration: Theme.duration-fast; }
-    }
-
     focus-ring := Rectangle {
-        x: -2px;
-        y: -2px;
-        width: parent.width + 4px;
-        height: parent.height + 4px;
-        border-radius: Theme.radius-md + 2px;
+        x: face.x - 4px;
+        y: face.y - 4px;
+        width: face.width + 8px;
+        height: face.height + 8px;
+        border-radius: self.height / 2;
         border-width: focus.has-focus ? 2px : 0;
         border-color: Theme.focus-ring;
+    }
+
+    face := Rectangle {
+        // Centred in the hit area, shifted against the shadow so the button
+        // appears to rise and sink.
+        x: root.icon-only ? (root.width - self.width) / 2 : root.lift;
+        y: (root.height - self.height) / 2 + root.lift;
+        width: root.icon-only ? root.visual-height : root.width;
+        height: root.visual-height;
+        border-radius: self.height / 2;
+        background: root.fill;
+        border-width: Theme.border-width;
+        border-color: root.outline;
+        drop-shadow-offset-x: root.pop;
+        drop-shadow-offset-y: root.pop;
+        drop-shadow-blur: 0;
+        drop-shadow-color: root.primary ? Theme.shadow-pop : transparent;
+        animate background, border-color { duration: Theme.duration-fast; }
+        animate x, y, drop-shadow-offset-x, drop-shadow-offset-y {
+            duration: Theme.duration-medium;
+            easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+    }
+
+    // Content rides along with the face. It must stay a direct, unpositioned
+    // child so its size constraints reach the button, so the face offset is
+    // moved into the padding (the totals stay constant).
+    HorizontalLayout {
+        padding-left: (root.icon-only ? 0 : (root.has-icon && !root.bubble ? Theme.space-3 : Theme.space-4)) + root.lift;
+        padding-right: (root.icon-only ? 0 : (root.bubble ? Theme.space-1 : Theme.space-4)) - root.lift;
+        padding-top: Theme.shadow-pop-pressed + root.lift;
+        padding-bottom: Theme.shadow-pop-pressed - root.lift;
+        spacing: root.bubble ? Theme.space-2 : Theme.space-1-5;
+        alignment: center;
+
+        if root.has-icon && !root.bubble: VerticalLayout {
+            alignment: center;
+            Icon {
+                source: root.icon;
+                size: root.size == ControlSize.small ? Theme.icon-sm : Theme.icon-md;
+                colorize: root.foreground;
+                // Icon-only buttons give a little wiggle on hover.
+                transform-rotation: root.icon-only && root.hovered ? -Theme.wiggle : 0deg;
+                animate transform-rotation { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+            }
+        }
+        if !root.icon-only: Text {
+            text: root.text;
+            font-size: root.size == ControlSize.small ? Theme.font-small : Theme.font-body;
+            font-weight: Theme.weight-bold;
+            color: root.foreground;
+            vertical-alignment: center;
+        }
+        if root.bubble: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: root.visual-height - 2 * Theme.space-1 - 2 * Theme.border-width;
+                height: self.width;
+                border-radius: self.width / 2;
+                background: Theme.on-accent;
+                Icon {
+                    source: root.icon;
+                    size: Theme.icon-sm;
+                    colorize: Theme.accent;
+                }
+            }
+        }
     }
 
     focus := FocusScope {
@@ -92,32 +177,9 @@ export component Button {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
-
-    HorizontalLayout {
-        padding-left: root.icon-only ? 0 : (root.has-icon ? Theme.space-2 + Theme.space-0-5 : Theme.space-3);
-        padding-right: root.icon-only ? 0 : Theme.space-3;
-        spacing: Theme.space-1-5;
-        alignment: center;
-
-        if root.has-icon: VerticalLayout {
-            alignment: center;
-            Icon {
-                source: root.icon;
-                size: root.size == ControlSize.small ? Theme.icon-sm : Theme.icon-md;
-                colorize: root.foreground;
-            }
-        }
-        if !root.icon-only: Text {
-            text: root.text;
-            font-size: root.size == ControlSize.small ? Theme.font-small : Theme.font-body;
-            font-weight: Theme.weight-medium;
-            color: root.foreground;
-            vertical-alignment: center;
-        }
-    }
 }
 
-// Square, icon-only ghost button (toolbar actions, row actions).
+// Round, icon-only ghost button (toolbar actions, row actions).
 export component IconButton inherits Button {
     variant: ButtonVariant.ghost;
     width: self.height;

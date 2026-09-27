@@ -1,15 +1,213 @@
 // Profiles and naming formats, with validation and a live preview against
 // the open file. Stored in `config.toml`.
+//
+// Responsive: from `lg` up the form scrolls beside a preview/actions
+// column; below it everything is one scrolling column with the actions
+// first.
 
-import { ComboBox, LineEdit, ScrollView, TextEdit } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import {
-    Theme, Tone, Icons, Badge, Button, ButtonVariant, ToggleRow, SectionCard, Banner, FormField,
-    DisplayText, SecondaryText, CaptionText, BodyText,
+    Select, TextField, TextArea, Theme, Tone, Viewport, Icons, Badge, Button, ButtonVariant, ToggleRow, SectionCard, Banner, FormField,
+    DisplayText, AccentMark, SecondaryText, CaptionText, BodyText,
 } from "../components/index.slint";
 import { Bridge } from "../bridge.slint";
 
+// The settings cards (scroll container supplied by the caller).
+component SettingsForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    alignment: start;
+
+    SectionCard {
+        title: "Profile";
+        HorizontalLayout {
+            spacing: Theme.space-2;
+            Select {
+                horizontal-stretch: 1;
+                model: Bridge.s-profile-names;
+                current-index <=> Bridge.s-profile-index;
+                selected => { Bridge.s-profile-selected(self.current-index); }
+            }
+            Button {
+                text: Viewport.sm ? "Duplicate" : "";
+                icon: Icons.copy-all;
+                accessible-name: "Duplicate profile";
+                clicked => { Bridge.s-add-profile(); }
+            }
+            Button {
+                text: Viewport.sm ? "Delete" : "";
+                icon: Icons.trash;
+                accessible-name: "Delete profile";
+                variant: ButtonVariant.danger;
+                enabled: Bridge.s-profile-names.length > 1;
+                clicked => { Bridge.s-delete-profile(); }
+            }
+        }
+        FormField {
+            label: "Profile name";
+            TextField { text <=> Bridge.s-name; edited => { Bridge.s-edited(); } }
+        }
+    }
+
+    SectionCard {
+        title: "Video";
+        FormField {
+            label: "Track name";
+            hint: "Tokens: {Resolution} {DynamicRange} {Codec} {BitDepth} {3D} {Language}. Example: 2160p DV8 HDR10 HEVC";
+            TextField { text <=> Bridge.s-video-format; edited => { Bridge.s-edited(); } }
+        }
+    }
+
+    SectionCard {
+        title: "Audio";
+        FormField {
+            label: "Track name";
+            hint: "Tokens: {Language} {Format} {Channels} {Atmos} {Commentary} {Description}. Example: English DD+ 5.1 Atmos";
+            TextField { text <=> Bridge.s-audio-format; edited => { Bridge.s-edited(); } }
+        }
+        FormField {
+            label: "Language rules";
+            hint: "One rule per line, first match wins: <original languages> => <languages to keep, in order>. {original} is the language picked per file and * matches any. The first kept main track becomes default; tracks in the original language get the Original flag.";
+            TextArea {
+                height: 96px;
+                text <=> Bridge.s-audio-rules;
+                edited => { Bridge.s-edited(); }
+            }
+        }
+        ToggleRow {
+            label: "Keep commentary tracks";
+            checked: Bridge.s-keep-commentary;
+            toggled(value) => { Bridge.s-keep-commentary = value; Bridge.s-edited(); }
+        }
+        ToggleRow {
+            label: "Keep audio description tracks";
+            checked: Bridge.s-keep-descriptions;
+            toggled(value) => { Bridge.s-keep-descriptions = value; Bridge.s-edited(); }
+        }
+    }
+
+    SectionCard {
+        title: "Subtitles";
+        // Side by side from `sm` up, stacked below.
+        if Viewport.sm: HorizontalLayout {
+            spacing: Theme.space-3;
+            FormField {
+                label: "Keep languages";
+                TextField { text <=> Bridge.s-sub-languages; edited => { Bridge.s-edited(); } }
+            }
+            FormField {
+                label: "Track name";
+                TextField { text <=> Bridge.s-sub-format; edited => { Bridge.s-edited(); } }
+            }
+        }
+        if !Viewport.sm: FormField {
+            label: "Keep languages";
+            TextField { text <=> Bridge.s-sub-languages; edited => { Bridge.s-edited(); } }
+        }
+        if !Viewport.sm: FormField {
+            label: "Track name";
+            TextField { text <=> Bridge.s-sub-format; edited => { Bridge.s-edited(); } }
+        }
+        FormField {
+            label: "Order";
+            hint: "Tokens: {Language} {Kind} {Format}. Kinds: Forced, Full, SDH, CC, Signs & Songs, Commentary — detected from flags and track titles. SDH and CC set the hearing-impaired flag.";
+            TextField { text <=> Bridge.s-sub-order; edited => { Bridge.s-edited(); } }
+        }
+        ToggleRow {
+            label: "Default-flag forced subtitles for foreign-language films";
+            checked: Bridge.s-default-forced;
+            toggled(value) => { Bridge.s-default-forced = value; Bridge.s-edited(); }
+        }
+        ToggleRow {
+            label: "Detect forced subtitles by event count";
+            checked: Bridge.s-detect-forced;
+            toggled(value) => { Bridge.s-detect-forced = value; Bridge.s-edited(); }
+        }
+    }
+
+    SectionCard {
+        title: "File naming";
+        description: "Radarr and Sonarr compatible.";
+        FormField {
+            label: "Movie format";
+            TextArea {
+                height: 64px;
+                wrap: word-wrap;
+                text <=> Bridge.s-movie-format;
+                edited => { Bridge.s-edited(); }
+            }
+        }
+        FormField {
+            label: "Episode format";
+            TextArea {
+                height: 64px;
+                wrap: word-wrap;
+                text <=> Bridge.s-episode-format;
+                edited => { Bridge.s-edited(); }
+            }
+        }
+        FormField {
+            label: "Colon replacement";
+            Select {
+                model: Bridge.s-colon-names;
+                current-index <=> Bridge.s-colon-index;
+                selected => { Bridge.s-edited(); }
+            }
+        }
+        FormField {
+            label: "Custom formats";
+            hint: "Matched against the source file name, one per line: Name = regex. Anything in [...] whose tokens are all empty is dropped, so [tmdbid-{TmdbId}] disappears without a TMDb ID. {prefix Token suffix}: the prefix and suffix only appear when the token has a value. Separators . _ - in token names replace spaces; ALL CAPS and lowercase token names change the value's case.";
+            TextArea {
+                height: 64px;
+                text <=> Bridge.s-custom-formats;
+                edited => { Bridge.s-edited(); }
+            }
+        }
+    }
+}
+
+component PreviewCard inherits SectionCard {
+    title: "Preview";
+    description: "What this profile does to the open file.";
+    BodyText {
+        text: Bridge.s-preview == "" ? "Open a file to preview this profile." : Bridge.s-preview;
+        color: Bridge.s-preview == "" ? Theme.text-muted : Theme.text-primary;
+        wrap: word-wrap;
+        font-size: Theme.font-small;
+    }
+}
+
+// Save / revert / restore, validation errors and a hint.
+component SettingsActions inherits VerticalLayout {
+    spacing: Theme.space-4;
+
+    if Bridge.s-errors != "": Banner { text: Bridge.s-errors; tone: Tone.danger; }
+    HorizontalLayout {
+        spacing: Theme.space-2;
+        Button {
+            text: "Save";
+            icon: Icons.save;
+            variant: ButtonVariant.primary;
+            enabled: Bridge.s-dirty && Bridge.s-errors == "";
+            clicked => { Bridge.s-save(); }
+        }
+        Button { text: "Revert"; enabled: Bridge.s-dirty; clicked => { Bridge.s-revert(); } }
+        Rectangle { horizontal-stretch: 1; }
+        Button {
+            text: Viewport.sm ? "Restore defaults" : "";
+            icon: Icons.reset;
+            accessible-name: "Restore defaults";
+            variant: ButtonVariant.ghost;
+            clicked => { Bridge.s-reset-defaults(); }
+        }
+    }
+    CaptionText {
+        text: "Saved settings apply to newly opened files. Use Apply profile or Apply to all to re-apply them to open files.";
+        wrap: word-wrap;
+    }
+}
+
 export component SettingsView inherits VerticalLayout {
-    padding: Theme.space-5;
+    padding: Viewport.gutter;
     spacing: Theme.space-4;
 
     HorizontalLayout {
@@ -18,7 +216,11 @@ export component SettingsView inherits VerticalLayout {
             spacing: Theme.space-1;
             horizontal-stretch: 1;
             DisplayText { text: "Settings"; }
-            SecondaryText { text: "Profiles decide which tracks to keep, their order, names and flags."; }
+            HorizontalLayout {
+                alignment: start;
+                AccentMark { }
+            }
+            SecondaryText { text: "Profiles decide which tracks to keep, their order, names and flags."; wrap: word-wrap; }
         }
         if Bridge.s-dirty: VerticalLayout {
             alignment: center;
@@ -26,191 +228,45 @@ export component SettingsView inherits VerticalLayout {
         }
     }
 
-    HorizontalLayout {
+    if Viewport.lg: HorizontalLayout {
         spacing: Theme.space-4;
         vertical-stretch: 1;
 
         form := ScrollView {
             horizontal-stretch: 3;
-            VerticalLayout {
+            SettingsForm {
                 // Without this the content takes its preferred width and
                 // scrolls horizontally instead of wrapping.
                 width: form.visible-width;
-                padding-right: Theme.space-3;
-                spacing: Theme.space-4;
-                alignment: start;
-
-                SectionCard {
-                    title: "Profile";
-                    HorizontalLayout {
-                        spacing: Theme.space-2;
-                        ComboBox {
-                            horizontal-stretch: 1;
-                            model: Bridge.s-profile-names;
-                            current-index <=> Bridge.s-profile-index;
-                            selected => { Bridge.s-profile-selected(self.current-index); }
-                        }
-                        Button { text: "Duplicate"; icon: Icons.copy-all; clicked => { Bridge.s-add-profile(); } }
-                        Button {
-                            text: "Delete";
-                            variant: ButtonVariant.danger;
-                            enabled: Bridge.s-profile-names.length > 1;
-                            clicked => { Bridge.s-delete-profile(); }
-                        }
-                    }
-                    FormField {
-                        label: "Profile name";
-                        LineEdit { text <=> Bridge.s-name; edited => { Bridge.s-edited(); } }
-                    }
-                }
-
-                SectionCard {
-                    title: "Video";
-                    FormField {
-                        label: "Track name";
-                        hint: "Tokens: {Resolution} {DynamicRange} {Codec} {BitDepth} {3D} {Language}. Example: 2160p DV8 HDR10 HEVC";
-                        LineEdit { text <=> Bridge.s-video-format; edited => { Bridge.s-edited(); } }
-                    }
-                }
-
-                SectionCard {
-                    title: "Audio";
-                    FormField {
-                        label: "Track name";
-                        hint: "Tokens: {Language} {Format} {Channels} {Atmos} {Commentary} {Description}. Example: English DD+ 5.1 Atmos";
-                        LineEdit { text <=> Bridge.s-audio-format; edited => { Bridge.s-edited(); } }
-                    }
-                    FormField {
-                        label: "Language rules";
-                        hint: "One rule per line, first match wins: <original languages> => <languages to keep, in order>. {original} is the language picked per file and * matches any. The first kept main track becomes default; tracks in the original language get the Original flag.";
-                        TextEdit {
-                            height: 96px;
-                            text <=> Bridge.s-audio-rules;
-                            edited => { Bridge.s-edited(); }
-                        }
-                    }
-                    ToggleRow {
-                        label: "Keep commentary tracks";
-                        checked: Bridge.s-keep-commentary;
-                        toggled(value) => { Bridge.s-keep-commentary = value; Bridge.s-edited(); }
-                    }
-                    ToggleRow {
-                        label: "Keep audio description tracks";
-                        checked: Bridge.s-keep-descriptions;
-                        toggled(value) => { Bridge.s-keep-descriptions = value; Bridge.s-edited(); }
-                    }
-                }
-
-                SectionCard {
-                    title: "Subtitles";
-                    HorizontalLayout {
-                        spacing: Theme.space-3;
-                        FormField {
-                            label: "Keep languages";
-                            LineEdit { text <=> Bridge.s-sub-languages; edited => { Bridge.s-edited(); } }
-                        }
-                        FormField {
-                            label: "Track name";
-                            LineEdit { text <=> Bridge.s-sub-format; edited => { Bridge.s-edited(); } }
-                        }
-                    }
-                    FormField {
-                        label: "Order";
-                        hint: "Tokens: {Language} {Kind} {Format}. Kinds: Forced, Full, SDH, CC, Signs & Songs, Commentary — detected from flags and track titles. SDH and CC set the hearing-impaired flag.";
-                        LineEdit { text <=> Bridge.s-sub-order; edited => { Bridge.s-edited(); } }
-                    }
-                    ToggleRow {
-                        label: "Default-flag forced subtitles for foreign-language films";
-                        checked: Bridge.s-default-forced;
-                        toggled(value) => { Bridge.s-default-forced = value; Bridge.s-edited(); }
-                    }
-                    ToggleRow {
-                        label: "Detect forced subtitles by event count";
-                        checked: Bridge.s-detect-forced;
-                        toggled(value) => { Bridge.s-detect-forced = value; Bridge.s-edited(); }
-                    }
-                }
-
-                SectionCard {
-                    title: "File naming";
-                    description: "Radarr and Sonarr compatible.";
-                    FormField {
-                        label: "Movie format";
-                        TextEdit {
-                            height: 64px;
-                            wrap: word-wrap;
-                            text <=> Bridge.s-movie-format;
-                            edited => { Bridge.s-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "Episode format";
-                        TextEdit {
-                            height: 64px;
-                            wrap: word-wrap;
-                            text <=> Bridge.s-episode-format;
-                            edited => { Bridge.s-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "Colon replacement";
-                        ComboBox {
-                            model: Bridge.s-colon-names;
-                            current-index <=> Bridge.s-colon-index;
-                            selected => { Bridge.s-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "Custom formats";
-                        hint: "Matched against the source file name, one per line: Name = regex. Anything in [...] whose tokens are all empty is dropped, so [tmdbid-{TmdbId}] disappears without a TMDb ID. {prefix Token suffix}: the prefix and suffix only appear when the token has a value. Separators . _ - in token names replace spaces; ALL CAPS and lowercase token names change the value's case.";
-                        TextEdit {
-                            height: 64px;
-                            text <=> Bridge.s-custom-formats;
-                            edited => { Bridge.s-edited(); }
-                        }
-                    }
-                }
+                // Clear the scrollbar and the cards' hard shadows.
+                padding-right: Theme.space-3 + Theme.shadow-card-offset;
+                padding-bottom: Theme.shadow-card-offset;
             }
         }
 
         VerticalLayout {
             width: 360px;
             spacing: Theme.space-4;
-
-            SectionCard {
-                title: "Preview";
-                description: "What this profile does to the open file.";
-                BodyText {
-                    text: Bridge.s-preview == "" ? "Open a file to preview this profile." : Bridge.s-preview;
-                    color: Bridge.s-preview == "" ? Theme.text-muted : Theme.text-primary;
-                    wrap: word-wrap;
-                    font-size: Theme.font-small;
-                }
-            }
-            if Bridge.s-errors != "": Banner { text: Bridge.s-errors; tone: Tone.danger; }
-            HorizontalLayout {
-                spacing: Theme.space-2;
-                Button {
-                    text: "Save";
-                    icon: Icons.save;
-                    variant: ButtonVariant.primary;
-                    enabled: Bridge.s-dirty && Bridge.s-errors == "";
-                    clicked => { Bridge.s-save(); }
-                }
-                Button { text: "Revert"; enabled: Bridge.s-dirty; clicked => { Bridge.s-revert(); } }
-                Rectangle { horizontal-stretch: 1; }
-                Button {
-                    text: "Restore defaults";
-                    icon: Icons.reset;
-                    variant: ButtonVariant.ghost;
-                    clicked => { Bridge.s-reset-defaults(); }
-                }
-            }
-            CaptionText {
-                text: "Saved settings apply to newly opened files. Use Apply profile or Apply to all to re-apply them to open files.";
-                wrap: word-wrap;
-            }
+            PreviewCard { }
+            SettingsActions { }
             Rectangle { vertical-stretch: 1; }
+        }
+    }
+
+    if !Viewport.lg: page := ScrollView {
+        vertical-stretch: 1;
+        viewport-height: column.height;
+        column := VerticalLayout {
+            y: 0;
+            width: page.visible-width;
+            height: max(self.min-height, self.preferred-height);
+            padding-right: Theme.space-2 + Theme.shadow-card-offset;
+            padding-bottom: Theme.shadow-card-offset;
+            spacing: Theme.space-4;
+            alignment: start;
+            SettingsActions { }
+            SettingsForm { }
+            PreviewCard { }
         }
     }
 }

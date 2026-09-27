@@ -1,59 +1,162 @@
 import { Theme, Tone } from "../theme/theme.slint";
+import { Icons } from "../theme/icons.slint";
+import { Viewport } from "../theme/viewport.slint";
 import { Icon, IconTile } from "icon.slint";
 import { Button, ButtonVariant } from "button.slint";
 import { DisplayText, SecondaryText } from "typography.slint";
+import { AccentMark } from "surfaces.slint";
+import { Confetti, ConfettiShape } from "decoration.slint";
+
+// The selected-row sticker: a violet "leaf" with an ink outline and a hard
+// shadow. `NavItem` draws it itself, or a list can draw a single one that
+// slides between rows (see `MediaInfoView`).
+export component NavHighlight inherits Rectangle {
+    in property <bool> hovered;
+    in property <bool> active: true;
+
+    Rectangle {
+        width: parent.width - Theme.shadow-sticker;
+        height: parent.height - Theme.shadow-sticker;
+        border-top-left-radius: Theme.leaf-round-lg;
+        border-bottom-right-radius: Theme.leaf-round-lg;
+        border-top-right-radius: Theme.leaf-sharp-lg;
+        border-bottom-left-radius: Theme.leaf-sharp-lg;
+        border-width: Theme.border-width;
+        border-color: root.active ? Theme.ink : (root.hovered ? Theme.border-strong : transparent);
+        background: root.active ? Theme.accent : (root.hovered ? Theme.state-hover : transparent);
+        drop-shadow-blur: 0;
+        drop-shadow-offset-x: root.active ? Theme.shadow-sticker : 0;
+        drop-shadow-offset-y: self.drop-shadow-offset-x;
+        drop-shadow-color: Theme.shadow-pop;
+        animate background, border-color { duration: Theme.duration-fast; }
+    }
+}
 
 // Selectable row in a sidebar or list (media-info sections, file browser).
+// Rows are "leaf" shaped; the selected row is a filled violet sticker with
+// a trailing arrow so it stands out at a glance. Set `external-highlight`
+// when the list draws one sliding `NavHighlight` behind its rows instead.
 export component NavItem inherits Rectangle {
     in property <string> text;
     in property <string> trailing;
     in property <image> icon;
     in property <Tone> icon-tone: Tone.neutral;
     in property <bool> selected;
+    in property <bool> external-highlight;
     callback clicked();
 
-    height: 34px;
-    border-radius: Theme.radius-sm;
-    background: selected ? Theme.state-selected : (touch.has-hover ? Theme.state-hover : transparent);
+    property <bool> hovered: touch.has-hover && !selected;
+
+    height: Theme.nav-item-height;
     accessible-role: list-item;
     accessible-label: text;
     accessible-item-selected: selected;
     accessible-action-default => { root.clicked(); }
-    animate background { duration: Theme.duration-fast; }
+    forward-focus: focus;
+
+    // Text turns "on accent" only once a sliding highlight has (nearly)
+    // arrived, and turns back at once as it leaves, so a row's label never
+    // vanishes against the plain background mid-glide.
+    states [
+        chosen when root.selected: {
+            label.color: Theme.on-accent;
+            arrow.opacity: 1;
+            in {
+                animate label.color, arrow.opacity {
+                    delay: root.external-highlight ? Theme.duration-glide / 2 : 0ms;
+                    duration: Theme.duration-glide / 2;
+                }
+            }
+            out {
+                animate label.color, arrow.opacity { duration: Theme.duration-fast; }
+            }
+        }
+    ]
+
+    NavHighlight {
+        hovered: root.hovered;
+        active: root.selected && !root.external-highlight;
+    }
+
+    // Keyboard: Tab to reach, Enter / Space to choose. Declared before the
+    // touch area so clicks reach the touch area on top.
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
 
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => {
+            focus.focus();
+            root.clicked();
+        }
+    }
+
+    Rectangle {
+        width: parent.width - Theme.shadow-sticker;
+        height: parent.height - Theme.shadow-sticker;
+        x: 0;
+        y: 0;
+        border-top-left-radius: Theme.leaf-round-lg;
+        border-bottom-right-radius: Theme.leaf-round-lg;
+        border-top-right-radius: Theme.leaf-sharp-lg;
+        border-bottom-left-radius: Theme.leaf-sharp-lg;
+        border-width: focus.has-focus ? 2px : 0;
+        border-color: Theme.focus-ring;
     }
 
     HorizontalLayout {
-        padding-left: Theme.space-2 + Theme.space-0-5;
-        padding-right: Theme.space-2 + Theme.space-0-5;
-        spacing: Theme.space-2;
+        padding-left: root.icon.width > 0 ? Theme.space-1-5 : Theme.space-3;
+        padding-right: Theme.space-2 + Theme.shadow-sticker;
+        padding-bottom: Theme.shadow-sticker;
+        spacing: Theme.space-2 + Theme.space-0-5;
 
         if root.icon.width > 0: VerticalLayout {
             alignment: center;
-            IconTile { icon: root.icon; tone: root.icon-tone; size: Theme.tile-xs; icon-size: Theme.icon-sm; }
+            IconTile {
+                icon: root.icon;
+                tone: root.icon-tone;
+                size: Theme.tile-xs;
+                icon-size: Theme.icon-sm;
+                lively: touch.has-hover;
+            }
         }
-        Text {
+        label := Text {
             text: root.text;
             overflow: elide;
             horizontal-stretch: 1;
             vertical-alignment: center;
             font-size: Theme.font-body;
-            font-weight: root.selected ? Theme.weight-medium : Theme.weight-regular;
-            color: root.selected ? Theme.accent-text : Theme.text-primary;
+            font-weight: root.selected ? Theme.weight-extrabold : Theme.weight-medium;
+            color: Theme.text-primary;
         }
         if root.trailing != "": Text {
             text: root.trailing;
             vertical-alignment: center;
             font-size: Theme.font-small;
-            color: Theme.text-muted;
+            color: root.selected ? Theme.on-accent : Theme.text-muted;
+        }
+        VerticalLayout {
+            alignment: center;
+            arrow := Icon {
+                source: Icons.arrow-up;
+                size: Theme.icon-sm;
+                colorize: Theme.on-accent;
+                transform-rotation: 90deg;
+                opacity: 0;
+            }
         }
     }
 }
 
 // Centred placeholder for an empty view: an invitation, not an apology.
+// The icon sits on a big yellow sun, surrounded by confetti.
 export component EmptyState inherits VerticalLayout {
     in property <image> icon;
     in property <string> title;
@@ -63,21 +166,43 @@ export component EmptyState inherits VerticalLayout {
     callback action();
 
     alignment: center;
-    spacing: Theme.space-4;
-    padding: Theme.space-8;
+    spacing: Theme.space-5;
+    padding: Viewport.md ? Theme.space-8 : Theme.space-4;
 
     HorizontalLayout {
         alignment: center;
-        IconTile { icon: root.icon; tone: Tone.accent; size: Theme.tile-lg; icon-size: Theme.icon-xl; }
+        Rectangle {
+            width: 200px;
+            height: 150px;
+
+            Confetti { x: 50px; y: 5px; size: 140px; color: Theme.yellow; }
+            Confetti { x: 6px; y: 18px; size: 30px; shape: ConfettiShape.triangle; color: Theme.pink; angle: -12deg; }
+            Confetti { x: 168px; y: 104px; size: 26px; shape: ConfettiShape.square; color: Theme.mint; angle: 18deg; }
+            Confetti { x: 14px; y: 104px; size: 22px; shape: ConfettiShape.ring; color: Theme.accent; }
+            IconTile {
+                x: 75px;
+                y: 30px;
+                icon: root.icon;
+                tone: Tone.accent;
+                size: 90px;
+                icon-size: 40px;
+                lively: hover.has-hover;
+            }
+            hover := TouchArea { }
+        }
     }
     VerticalLayout {
         spacing: Theme.space-2;
         DisplayText { text: root.title; horizontal-alignment: center; }
         HorizontalLayout {
             alignment: center;
+            AccentMark { }
+        }
+        HorizontalLayout {
+            alignment: center;
             SecondaryText {
                 text: root.message;
-                max-width: 420px;
+                max-width: 440px;
                 wrap: word-wrap;
                 horizontal-alignment: center;
             }

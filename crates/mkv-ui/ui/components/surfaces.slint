@@ -1,18 +1,31 @@
 import { Theme, Tone } from "../theme/theme.slint";
-import { Icons } from "../theme/icons.slint";
-import { Icon } from "icon.slint";
+import { Icons, Patterns } from "../theme/icons.slint";
+import { Icon, IconTile } from "icon.slint";
 import { IconButton, ControlSize } from "button.slint";
-import { BodyText, TitleText, CaptionText } from "typography.slint";
+import { BodyText, TitleText, CaptionText, OverlineText } from "typography.slint";
 
-// Raised container on the canvas. Lay out children with a layout inside.
+// "Sticker" card: white, chunky ink outline, hard offset shadow. Children
+// are clipped to the rounded shape and the outline is drawn on top, so row
+// highlights never cover it. Lay out children with a layout inside.
 export component Card inherits Rectangle {
+    // Pink shadow for the one card that deserves attention in a view.
+    in property <bool> featured;
+
     background: Theme.surface;
     border-radius: Theme.radius-lg;
-    border-width: Theme.border-width;
-    border-color: Theme.border;
-    drop-shadow-blur: 3px;
-    drop-shadow-offset-y: 1px;
-    drop-shadow-color: Theme.shadow;
+    clip: true;
+    drop-shadow-blur: 0;
+    drop-shadow-offset-x: Theme.shadow-card-offset;
+    drop-shadow-offset-y: Theme.shadow-card-offset;
+    drop-shadow-color: featured ? Theme.shadow-featured : Theme.shadow-card;
+
+    @children
+
+    Rectangle {
+        border-radius: parent.border-radius;
+        border-width: Theme.border-width;
+        border-color: Theme.ink;
+    }
 }
 
 // Card with a title (and optional description) above its content.
@@ -21,7 +34,7 @@ export component SectionCard inherits Card {
     in property <string> description;
 
     VerticalLayout {
-        padding: Theme.space-4;
+        padding: Theme.space-5;
         spacing: Theme.space-3;
         VerticalLayout {
             spacing: Theme.space-0-5;
@@ -33,16 +46,48 @@ export component SectionCard inherits Card {
 }
 
 export component Divider inherits Rectangle {
-    height: Theme.border-width;
+    height: Theme.hairline;
     background: Theme.border;
 }
 
 export component VerticalDivider inherits Rectangle {
-    width: Theme.border-width;
+    width: Theme.hairline;
     background: Theme.border;
 }
 
-// Inline message, tinted by tone.
+// Title accent: a violet pill followed by a pink and a yellow dot — the
+// design's primitive shapes in a small, calm row. Sits under page and
+// document titles.
+export component AccentMark inherits HorizontalLayout {
+    // Fixed height so parent layouts never stretch it.
+    height: 6px;
+    spacing: Theme.space-1;
+    alignment: start;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    accessible-role: none;
+
+    Rectangle {
+        width: 28px;
+        height: 6px;
+        border-radius: self.height / 2;
+        background: Theme.accent;
+    }
+    Rectangle {
+        width: 6px;
+        height: 6px;
+        border-radius: self.height / 2;
+        background: Theme.pink;
+    }
+    Rectangle {
+        width: 6px;
+        height: 6px;
+        border-radius: self.height / 2;
+        background: Theme.yellow;
+    }
+}
+
+// Inline message: pastel fill, outlined in the tone, icon in a circle.
 export component Banner inherits Rectangle {
     in property <string> text;
     in property <Tone> tone: Tone.neutral;
@@ -50,28 +95,33 @@ export component Banner inherits Rectangle {
     callback dismiss();
 
     border-radius: Theme.radius-md;
+    border-width: Theme.border-width;
+    border-color: Theme.tone-solid(tone);
     background: Theme.tone-background(tone);
     accessible-role: AccessibleRole.text;
     accessible-label: text;
 
     HorizontalLayout {
-        padding-left: Theme.space-3;
+        padding-left: Theme.space-2;
         padding-right: root.dismissable ? Theme.space-1 : Theme.space-3;
         padding-top: Theme.space-2;
         padding-bottom: Theme.space-2;
-        spacing: Theme.space-2;
+        spacing: Theme.space-2 + Theme.space-0-5;
 
         VerticalLayout {
             alignment: center;
-            Icon {
-                source: root.tone == Tone.danger || root.tone == Tone.warning ? Icons.alert : Icons.info;
-                colorize: Theme.tone-foreground(root.tone);
+            IconTile {
+                icon: root.tone == Tone.danger || root.tone == Tone.warning ? Icons.alert : Icons.info;
+                tone: root.tone;
+                size: Theme.tile-xs;
+                icon-size: Theme.icon-sm;
             }
         }
         BodyText {
             text: root.text;
             wrap: word-wrap;
             horizontal-stretch: 1;
+            font-weight: Theme.weight-medium;
             color: Theme.tone-foreground(root.tone);
         }
         if root.dismissable: VerticalLayout {
@@ -86,38 +136,55 @@ export component Banner inherits Rectangle {
     }
 }
 
-// Determinate progress, 0.0 – 1.0.
+// Determinate progress, 0.0 – 1.0: an outlined pill filled with candy
+// stripes.
 export component ProgressBar inherits Rectangle {
     in property <float> value;
     in property <Tone> tone: Tone.accent;
 
     height: Theme.progress-height;
     border-radius: self.height / 2;
+    border-width: Theme.border-width;
+    border-color: Theme.ink;
     background: Theme.surface-muted;
     accessible-role: progress-indicator;
     accessible-value: round(clamp(value, 0, 1) * 100) + "%";
 
     Rectangle {
-        x: 0;
-        width: parent.width * clamp(root.value, 0, 1);
-        border-radius: parent.border-radius;
-        background: Theme.tone-solid(root.tone);
-        animate width { duration: Theme.duration-medium; }
+        x: Theme.border-width;
+        y: Theme.border-width;
+        width: parent.width - 2 * Theme.border-width;
+        height: parent.height - 2 * Theme.border-width;
+        border-radius: self.height / 2;
+        clip: true;
+
+        Rectangle {
+            x: 0;
+            width: parent.width * clamp(root.value, 0, 1);
+            background: Theme.tone-solid(root.tone);
+            animate width { duration: Theme.duration-medium; }
+
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: Patterns.stripes;
+                colorize: Theme.pink;
+                horizontal-tiling: repeat;
+                vertical-tiling: repeat;
+                accessible-role: none;
+            }
+        }
     }
 }
 
-// Label + control + optional hint, stacked.
+// Label + control + optional hint, stacked. The label is a bold,
+// uppercase overline.
 export component FormField inherits VerticalLayout {
     in property <string> label;
     in property <string> hint;
     spacing: Theme.space-1-5;
 
-    Text {
-        text: root.label;
-        font-size: Theme.font-small;
-        font-weight: Theme.weight-medium;
-        color: Theme.text-secondary;
-    }
+    OverlineText { label: root.label; }
     @children
     if root.hint != "": CaptionText { text: root.hint; wrap: word-wrap; }
 }

@@ -119,25 +119,58 @@ docker/
 
 ### UI design system
 
+The UI uses a **Playful Geometric** design language: clean content on warm
+paper, chunky 2px ink outlines, hard offset "sticker" shadows, pill
+controls, a dot-grid canvas, and violet / pink / yellow / mint confetti
+accents, with bouncy motion. Headings use Outfit and body text uses
+Plus Jakarta Sans. Both fonts are bundled.
+
 `crates/mkv-ui/ui/` is layered so styling lives in one place:
 
 ```
 theme/swatches.slint   primitive colour palette (the only raw colour values)
-theme/theme.slint      semantic tokens: surfaces, text, accent, tones, spacing,
-                       radius, type scale, sizes, motion — light and dark
-theme/icons.slint      icon registry (outline SVGs in icons/, tinted at runtime)
-components/            Button, Badge, Toggle, SegmentedControl, Card, Banner,
-                       FormField, NavItem, EmptyState, typography — import via
-                       components/index.slint
+theme/theme.slint      semantic tokens: surfaces, ink, hard shadows, text,
+                       accent, confetti, tones, spacing, radius, type scale,
+                       breakpoints, sizes, motion — light ("paper") and dark
+                       ("night")
+theme/viewport.slint   responsive state: the window width and the sm / md /
+                       lg / xl breakpoint flags
+theme/icons.slint      icon registry (outline SVGs in icons/, tinted at
+                       runtime) and tileable patterns (patterns/)
+fonts/                 Outfit and Plus Jakarta Sans (variable, SIL OFL)
+components/            Button, Badge, Toggle, SegmentedControl, TextField,
+                       TextArea, Select, Card, Banner, AccentMark, FormField,
+                       NavItem, NavHighlight, EmptyState, DotGrid, Confetti,
+                       typography — import via components/index.slint
 views/                 screens (app bar, document, tracks + inspector, media
                        info, naming, settings, library browser)
 bridge.slint           the Rust ↔ UI contract
 ```
 
+**Responsive.** Slint has no media queries, so the UI follows Slint's
+documented approach: the window writes its width to the `Viewport` global,
+and layouts switch arrangement with plain `if`s on its min-width flags. The
+breakpoints are the standard scale (`sm` 640, `md` 768, `lg` 1024, `xl`
+1280, defined once in `Theme`). From `lg` up, the document fills the window
+with side-by-side panels. Below `lg` it becomes one scrolling page with
+stacked panels, and headers, toolbars and forms restack below `md` / `sm`.
+Tab strips, fact badges and library roots scroll sideways instead of
+widening the window, so nothing overflows horizontally down to the 320px
+minimum width.
+
+**Accessible (WCAG 2.1 AA).** Text colours meet 4.5:1 and control outlines
+meet 3:1 in both schemes. Every button, tab, toggle, list row and option
+has a hit area of at least 44 × 44 (`Theme.touch-target`), even when the
+visible pill is smaller. Everything is keyboard-operable with a visible
+focus ring: Tab to move, Enter/Space to activate, ←/→ in the page
+switcher, and ↑/↓ plus Space in the track list. Icon-only buttons carry
+accessible names.
+
 Views only use `Theme` tokens and `Tone` for colour (`Tone.video`,
 `Tone.warning`, …), never raw colours. The colour scheme follows the system
-and can be toggled from the app bar; text inputs and combo boxes are Slint's
-std-widgets, which follow the same scheme.
+and can be toggled from the app bar. Text inputs and pickers are our own
+components rather than Slint's std-widgets, because the stock widgets draw
+frames that can't follow the design.
 
 ## Prerequisites
 

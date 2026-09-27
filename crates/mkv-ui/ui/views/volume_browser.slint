@@ -4,12 +4,12 @@
 
 import { ListView } from "std-widgets.slint";
 import {
-    Theme, Tone, Icons, Icon, Button, ButtonVariant, Card, Divider, NavItem, DisplayText, SecondaryText, CaptionText,
+    Theme, Tone, Viewport, Icons, Icon, Button, ButtonVariant, Card, Divider, NavItem, DisplayText, AccentMark, SecondaryText, CaptionText,
 } from "../components/index.slint";
 import { Bridge } from "../bridge.slint";
 
 export component VolumeBrowser inherits VerticalLayout {
-    padding: Theme.space-5;
+    padding: Viewport.gutter;
     spacing: Theme.space-4;
 
     HorizontalLayout {
@@ -18,26 +18,40 @@ export component VolumeBrowser inherits VerticalLayout {
             spacing: Theme.space-1;
             horizontal-stretch: 1;
             DisplayText { text: "Library"; }
-            SecondaryText { text: "Choose a file to open it in a new tab. Only .mkv files are shown."; }
+            HorizontalLayout {
+                alignment: start;
+                AccentMark { }
+            }
+            SecondaryText { text: "Choose a file to open it in a new tab. Only .mkv files are shown."; wrap: word-wrap; }
         }
         if Bridge.tabs.length > 0: VerticalLayout {
             alignment: center;
-            Button { text: "Close"; icon: Icons.close; variant: ButtonVariant.ghost; clicked => { Bridge.browse-close(); } }
+            Button {
+                text: Viewport.sm ? "Close" : "";
+                icon: Icons.close;
+                variant: ButtonVariant.ghost;
+                accessible-name: "Close library";
+                clicked => { Bridge.browse-close(); }
+            }
         }
     }
 
     // Never stretch: the list card below takes the free height, even while
-    // the roots are still loading.
-    HorizontalLayout {
-        spacing: Theme.space-2;
-        alignment: start;
+    // the roots are still loading. Scrolls sideways when the roots don't fit.
+    roots := Flickable {
         vertical-stretch: 0;
-        min-height: Theme.control-height;
-        for root-id in Bridge.volume-roots: Button {
-            text: root-id;
-            icon: Icons.folder;
-            selected: root-id == Bridge.browse-root;
-            clicked => { Bridge.browse-root-selected(root-id); }
+        min-width: 0;
+        height: Theme.touch-target;
+        viewport-width: max(self.width, roots-row.preferred-width);
+        roots-row := HorizontalLayout {
+            spacing: Theme.space-2;
+            alignment: start;
+            for root-id in Bridge.volume-roots: Button {
+                text: root-id;
+                icon: Icons.folder;
+                selected: root-id == Bridge.browse-root;
+                clicked => { Bridge.browse-root-selected(root-id); }
+            }
         }
     }
 
