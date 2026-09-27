@@ -320,6 +320,11 @@ jobs:
           for brew in /opt/homebrew/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
             [[ -x "$brew" ]] && dirname "$brew" >> "$GITHUB_PATH" && break
           done
+      # `brew install` updates Homebrew first for users; do it once here so
+      # the check runs the Homebrew they get, not the runner image's stale
+      # copy (its patchelf.rb 1.6.2 can't add an RPATH to lld-linked x86_64
+      # binaries: Encoding::CompatibilityError in `patch!`).
+      - run: brew update
       - run: brew tap "$TAP"
       - run: brew install "$TAP/mkv-track-editor"
       - run: brew test "$TAP/mkv-track-editor"

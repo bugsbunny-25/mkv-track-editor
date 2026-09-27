@@ -67,3 +67,15 @@ easy to get wrong here.
   `Cargo.toml`); don't turn Slint's default features back on.
 - The web build without Docker: `cd crates/mkv-web && wasm-pack build
   --release --target web`.
+
+## Releases and Homebrew
+
+- Releases are cut by pushing a `release/X.Y.Z` branch whose version matches
+  `Cargo.toml` (see the header of `.github/workflows/ci.yml`); only do it
+  after the `main` run, including both images, is green. Pushing the same
+  release branch again republishes that version.
+- The Linux formula patches the binary's interpreter and RPATH at install
+  time with Homebrew's patchelf.rb. patchelf.rb 1.6.2 (on stale Homebrew
+  installs, like the x86_64 runner image) crashes adding an RPATH to the
+  lld-linked x86_64 binary (`Encoding::CompatibilityError`); 1.7.0 fixed
+  it. The install check therefore runs `brew update` first — keep it.
