@@ -43,8 +43,11 @@ RUN version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version
 COPY . .
 
 # Same steps and output (crates/mkv-web/pkg) as `wasm-pack build --release
-# --target web`.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+# --target web`. Each stage has its own registry cache: this stage and the
+# server's run in parallel, and cargo's package lock lives outside the
+# mount, so a shared one lets both unpack the same crate at once
+# ("failed to unpack package ... File exists").
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-wasm \
     --mount=type=cache,target=/workspace/target,id=wasm-target \
     cargo build --release --locked --lib --target wasm32-unknown-unknown -p mkv-web \
     && wasm-bindgen --target web --out-dir crates/mkv-web/pkg \
@@ -63,8 +66,9 @@ RUN apk add --no-cache musl-dev
 WORKDIR /workspace
 COPY . .
 
-# The target dir is a cache mount, so the binary is copied out of it.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+# The target dir is a cache mount, so the binary is copied out of it. See
+# the wasm stage for why the registry cache isn't shared with it.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-server-$TARGETPLATFORM \
     --mount=type=cache,target=/workspace/target,id=server-target-$TARGETPLATFORM \
     cargo build --release --locked -p mkv-server \
     && cp target/release/mkv-server /mkv-server
