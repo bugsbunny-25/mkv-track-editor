@@ -1,44 +1,58 @@
 # syntax=docker/dockerfile:1
 #
-# Debian trixie throughout: the runtime needs MediaInfo >= 23.04 (first
-# release that reads HDR10+ from Matroska); bookworm ships 23.01. The build
-# stages match the runtime's distro so the server binary links against the
-# same glibc.
+# Alpine throughout. The runtime needs MediaInfo >= 23.04 (first release
+# that reads HDR10+ from Matroska); Alpine 3.23 ships 25.09. The server is
+# built against musl in an Alpine stage so it runs on the Alpine runtime.
+#
+# Multi-arch: build with `--platform linux/amd64,linux/arm64`. The wasm
+# bundle is architecture-independent, so its stage always runs on the build
+# machine's own platform (no emulation) and is shared by every target.
+
+ARG ALPINE_VERSION=3.23
 
 #####################################################################
 # Stage 1: build the Slint UI compiled to wasm (mkv-web), served as
 # static assets by the server in the final stage. The whole workspace is
 # copied since its crates are path dependencies of one another.
 #####################################################################
-FROM rust:1-slim-trixie AS wasm-builder
+FROM --platform=$BUILDPLATFORM rust:1-alpine${ALPINE_VERSION} AS wasm-builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN rustup target add wasm32-unknown-unknown \
+RUN apk add --no-cache musl-dev binaryen \
+    && rustup target add wasm32-unknown-unknown \
     && cargo install wasm-pack --locked
 
+# wasm-pack's own downloads of wasm-bindgen are glibc builds that can't run
+# on musl, so install the CLI matching the locked wasm-bindgen version;
+# wasm-pack picks it (and binaryen's wasm-opt) up from PATH.
 WORKDIR /workspace
+COPY Cargo.lock .
+RUN version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p') \
+    && cargo install wasm-bindgen-cli --locked --version "$version"
+
 COPY . .
 
 WORKDIR /workspace/crates/mkv-web
-RUN wasm-pack build --release --target web
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/workspace/target,id=wasm-target \
+    wasm-pack build --release --target web
 
 #####################################################################
-# Stage 2: build the server binary. mkv-server has no UI/Slint
-# dependency at all, so this stage stays lean (no wasm target).
+# Stage 2: build the server binary for the target platform. mkv-server
+# has no UI/Slint dependency at all, so this stage stays lean.
 #####################################################################
-FROM rust:1-slim-trixie AS server-builder
+FROM rust:1-alpine${ALPINE_VERSION} AS server-builder
+ARG TARGETPLATFORM
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential pkg-config \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache musl-dev
 
 WORKDIR /workspace
 COPY . .
 
-RUN cargo build --release -p mkv-server
+# The target dir is a cache mount, so the binary is copied out of it.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/workspace/target,id=server-target-$TARGETPLATFORM \
+    cargo build --release --locked -p mkv-server \
+    && cp target/release/mkv-server /mkv-server
 
 #####################################################################
 # Stage 3: slim runtime image.
@@ -47,16 +61,14 @@ RUN cargo build --release -p mkv-server
 #  - mediainfo: HDR / Dolby Vision / Atmos / DTS:X analysis and the
 #    media-info viewer.
 #####################################################################
-FROM debian:trixie-slim
+FROM alpine:${ALPINE_VERSION}
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    mkvtoolnix mediainfo ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system mkv && useradd --system --gid mkv --home-dir /app --create-home mkv
+RUN apk add --no-cache mkvtoolnix mediainfo ca-certificates \
+    && addgroup -S mkv && adduser -S -G mkv -h /app mkv
 
 WORKDIR /app
 
-COPY --from=server-builder /workspace/target/release/mkv-server /app/mkv-server
+COPY --from=server-builder /mkv-server /app/mkv-server
 COPY --from=wasm-builder /workspace/crates/mkv-web/index.html /app/static/index.html
 COPY --from=wasm-builder /workspace/crates/mkv-web/pkg /app/static/pkg
 

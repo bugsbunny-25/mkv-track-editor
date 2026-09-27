@@ -114,7 +114,11 @@ crates/
   mkv-server/    axum binary (JSON/SSE API + serves the wasm bundle)
   mkv-web/       wasm binary (talks to mkv-server over HTTP/SSE)
 docker/
-  Dockerfile, docker-compose.yml
+  Dockerfile (Alpine, multi-arch), docker-compose.yml
+packaging/
+  package-desktop.sh           release archives (macOS .app bundle, Linux binary)
+  homebrew/render-formula.sh   the Homebrew tap formula, rendered by CI
+.github/workflows/ci.yml       tests, builds, images, releases
 ```
 
 ### UI design system
@@ -183,8 +187,24 @@ frames that can't follow the design.
 - For the web/Docker build: `rustup target add wasm32-unknown-unknown` and
   `cargo install wasm-pack --locked`.
 - **Docker** (with Compose) to build/run the container.
+- Linux desktop builds: `apt install pkg-config libfontconfig1-dev libxkbcommon-dev`.
 
 ## Desktop app
+
+### Install with Homebrew (macOS Apple silicon, Linux x86_64/arm64)
+
+```bash
+brew install bugsbunny-25/tap/mkv-track-editor
+```
+
+This also installs MKVToolNix and MediaInfo. Run `mkv-track-editor` from a
+terminal; on macOS the formula also installs `MKV Track Editor.app` (see
+`brew info mkv-track-editor` to add it to `/Applications`). On Linux the
+app uses Homebrew's X11/Wayland/Mesa libraries, which come with
+MKVToolNix anyway, and file dialogs go through the desktop's
+xdg-desktop-portal.
+
+### From source
 
 ```bash
 cargo run -p mkv-desktop
@@ -210,6 +230,15 @@ MKV_STATIC_DIR=/tmp/mkv-static \
 ```
 
 Open `http://localhost:8080`.
+
+### Prebuilt image
+
+CI publishes a multi-arch (`linux/amd64`, `linux/arm64`) Alpine image to
+`ghcr.io/bugsbunny-25/mkv-track-editor`: `:main` and `:sha-<commit>` from
+`main`, `:X.Y.Z`, `:X.Y` and `:latest` from `release/X.Y.Z`. The package is
+private like this repository, so `docker login ghcr.io` first. To use it with
+Compose, replace the `build:` block in `docker-compose.yml` with
+`image: ghcr.io/bugsbunny-25/mkv-track-editor:latest`.
 
 ### With Docker Compose
 
@@ -268,3 +297,39 @@ cargo test -p mkv-core --test real_binaries
 format/channel matrix, all three audio language rules, subtitle
 classification/flags, ~20 real-world release names, and the Radarr/Sonarr
 templates (including the missing-TMDb-ID case).
+
+## CI/CD
+
+`.github/workflows/ci.yml` runs on pull requests and on pushes to `main` and
+`release/X.Y.Z` branches.
+
+| | Pull request | `main` | `release/X.Y.Z` |
+|---|---|---|---|
+| `cargo test --workspace` (with real mkvmerge/mediainfo/ffmpeg) | ✓ | ✓ | ✓ |
+| Web build (wasm UI + server) | ✓ | ✓ | ✓ |
+| Desktop build: macOS arm64, Linux x86_64, Linux arm64 | ✓ | ✓ | ✓ |
+| Desktop archives kept as workflow artifacts | | ✓ | ✓ |
+| Alpine image for amd64 + arm64 pushed to GHCR | | `:main`, `:sha-…` | `:X.Y.Z`, `:X.Y`, `:latest` |
+| GitHub release + formula in the Homebrew tap, then install-tested with `brew` on macOS and Linux | | | ✓ |
+
+**Cutting a release:** bump `version` in the root `Cargo.toml` to `X.Y.Z`
+on `main`, then push a `release/X.Y.Z` branch. The run fails early if the
+branch name and `Cargo.toml` disagree. Pushing fixes to the same branch
+republishes `X.Y.Z` (the image tags, release archives and formula checksums
+are replaced).
+
+Linux desktop binaries are built on Ubuntu 22.04, so they need glibc 2.35+,
+the same minimum as Homebrew on Linux. Each architecture's image is built on
+a native runner, and the two are then merged into one multi-arch tag.
+
+**One-time setup:**
+
+- The public tap repository
+  [`bugsbunny-25/homebrew-tap`](https://github.com/bugsbunny-25/homebrew-tap)
+  hosts the formula *and* the release archives, since Homebrew can't
+  download from this private repository.
+- Repository secret `HOMEBREW_TAP_TOKEN`: a fine-grained personal access
+  token limited to `bugsbunny-25/homebrew-tap` with **Contents: Read and
+  write**.
+- Images are pushed with the workflow's own `GITHUB_TOKEN`; nothing else is
+  needed.
