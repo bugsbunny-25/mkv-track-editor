@@ -8,7 +8,8 @@ use futures_util::stream::{self, Stream, StreamExt};
 use mkv_core::config_store;
 use mkv_profiles::AppConfig;
 use mkv_types::{
-    ApiError, DirListing, FileAnalysis, JobId, JobPhase, JobProgress, ProbeResult, RemuxPlan, RootInfo, TrackEdit,
+    ApiError, AttachmentInfo, DirListing, FileAnalysis, JobId, JobPhase, JobProgress, ProbeResult, RemuxPlan, RootInfo,
+    TrackEdit,
 };
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -82,6 +83,8 @@ pub struct SubmitJobRequest {
     output_path: String,
     kept_track_order: Vec<u64>,
     edits: Vec<TrackEdit>,
+    #[serde(default)]
+    remove_attachments: Vec<AttachmentInfo>,
 }
 
 #[derive(Serialize)]
@@ -104,6 +107,7 @@ pub async fn submit_job(
         output_path: output_path.to_string_lossy().into_owned(),
         kept_track_order: req.kept_track_order,
         edits: req.edits,
+        remove_attachments: req.remove_attachments,
     };
     mkv_core::plan::validate(&plan)?;
 

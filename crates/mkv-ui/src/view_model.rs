@@ -971,6 +971,10 @@ fn wire_tracks(window: &AppWindow, ctx: &Ctx) {
         });
         c.with(|b, st| {
             if let Some(doc) = st.active_doc().cloned() {
+                // An auto-generated name may follow the language. Rows are
+                // updated in place, and the focused language field keeps
+                // its text.
+                sync_tracks(b, &doc, false);
                 sync_output(b, &doc, &st.config, true);
             }
             sync_nav(b, st);
@@ -988,7 +992,7 @@ fn wire_tracks(window: &AppWindow, ctx: &Ctx) {
             "commentary" => Flag::Commentary,
             _ => return,
         };
-        edit_doc(&c, false, |doc, _| doc.set_flag(row as usize, flag, value));
+        edit_doc(&c, false, |doc, config| doc.set_flag(row as usize, flag, value, config));
     });
 }
 
@@ -1059,7 +1063,12 @@ fn start_job(ctx: &Ctx, id: u64, output: SourceRef) {
         let doc = &mut st.docs[i];
         doc.job = JobState::Running { job: None, percent: 0 };
         let kept = doc.kept();
-        let input = (doc.source.clone(), kept.iter().map(|e| e.id).collect::<Vec<_>>(), kept);
+        let input = (
+            doc.source.clone(),
+            kept.iter().map(|e| e.id).collect::<Vec<_>>(),
+            kept,
+            doc.removed_attachments(),
+        );
         if st.active == Some(i) {
             let doc = doc.clone();
             sync_job(b, &doc);
@@ -1067,14 +1076,14 @@ fn start_job(ctx: &Ctx, id: u64, output: SourceRef) {
         sync_nav(b, st);
         Some(input)
     });
-    let Some(Some((source, order, edits))) = job_input else { return };
+    let Some(Some((source, order, edits, remove_attachments))) = job_input else { return };
 
     let c = ctx.clone();
     let output_label = match &output {
         SourceRef::LocalPath(p) => p.clone(),
         SourceRef::ServerPath { path, .. } => format!("output:/{path}"),
     };
-    ctx.backend.submit_job(source, output, order, edits, Box::new(move |result| match result {
+    ctx.backend.submit_job(source, output, order, edits, remove_attachments, Box::new(move |result| match result {
         Ok(job_id) => {
             update_doc(&c, id, |doc| doc.job = JobState::Running { job: Some(job_id.clone()), percent: 0 });
 

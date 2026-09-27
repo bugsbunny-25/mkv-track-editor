@@ -41,6 +41,25 @@ pub fn validate(plan: &RemuxPlan) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Checks that every attachment the plan removes exists in the probed source
+/// with the same id and UID, so a stale or forged plan can't delete the
+/// wrong attachment (mkvmerge selects by id, mkvpropedit by UID).
+pub fn validate_attachments(original: &ProbeResult, plan: &RemuxPlan) -> Result<(), CoreError> {
+    for removed in &plan.remove_attachments {
+        let exists = original
+            .attachments
+            .iter()
+            .any(|a| a.id == removed.id && a.uid == removed.uid);
+        if !exists {
+            return Err(CoreError::InvalidPlan(format!(
+                "attachment {} ({}) is not in the source file",
+                removed.id, removed.file_name
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Decides whether `plan` can take the fast `mkvpropedit` path or needs a
 /// full `mkvmerge` remux, by comparing the plan's kept/ordered tracks against
 /// the original probed track order: identical order and set means only
@@ -57,7 +76,7 @@ pub fn classify(original: &ProbeResult, plan: &RemuxPlan) -> ExecutionStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mkv_types::{ContainerInfo, TrackEdit, TrackFlags, TrackInfo, TrackType};
+    use mkv_types::{AttachmentInfo, ContainerInfo, TrackEdit, TrackFlags, TrackInfo, TrackType};
 
     fn track(id: u64, uid: u64, t: TrackType) -> TrackInfo {
         TrackInfo {
@@ -82,10 +101,37 @@ mod tests {
         }
     }
 
+    fn attachment(id: u64, uid: u64) -> AttachmentInfo {
+        AttachmentInfo {
+            id,
+            uid,
+            file_name: "cover.jpg".into(),
+            mime_type: "image/jpeg".into(),
+            size: 1,
+        }
+    }
+
+    #[test]
+    fn removed_attachments_must_exist_in_the_source() {
+        let mut original = probe_with(&[(0, 10, TrackType::Video)]);
+        original.attachments = vec![attachment(1, 501)];
+        let plan = |removed| RemuxPlan {
+            source_path: "in.mkv".into(),
+            output_path: "out.mkv".into(),
+            kept_track_order: vec![0],
+            edits: vec![edit(0, 10, TrackType::Video)],
+            remove_attachments: vec![removed],
+        };
+        assert!(validate_attachments(&original, &plan(attachment(1, 501))).is_ok());
+        assert!(validate_attachments(&original, &plan(attachment(1, 999))).is_err());
+        assert!(validate_attachments(&original, &plan(attachment(2, 501))).is_err());
+    }
+
     fn probe_with(ids: &[(u64, u64, TrackType)]) -> ProbeResult {
         ProbeResult {
             container: ContainerInfo::default(),
             tracks: ids.iter().map(|(id, uid, t)| track(*id, *uid, *t)).collect(),
+            attachments: vec![],
         }
     }
 
@@ -100,6 +146,7 @@ mod tests {
                 edit(0, 10, TrackType::Video),
                 edit(1, 11, TrackType::Audio),
             ],
+            remove_attachments: vec![],
         };
         assert_eq!(classify(&original, &plan), ExecutionStrategy::MetadataOnly);
     }
@@ -115,6 +162,7 @@ mod tests {
                 edit(0, 10, TrackType::Video),
                 edit(1, 11, TrackType::Audio),
             ],
+            remove_attachments: vec![],
         };
         assert_eq!(classify(&original, &plan), ExecutionStrategy::Remux);
     }
@@ -127,6 +175,7 @@ mod tests {
             output_path: "out.mkv".into(),
             kept_track_order: vec![0],
             edits: vec![edit(0, 10, TrackType::Video)],
+            remove_attachments: vec![],
         };
         assert_eq!(classify(&original, &plan), ExecutionStrategy::Remux);
     }
@@ -138,6 +187,7 @@ mod tests {
             output_path: "out.mkv".into(),
             kept_track_order: vec![0, 1],
             edits: vec![edit(0, 10, TrackType::Video)],
+            remove_attachments: vec![],
         };
         assert!(validate(&plan).is_err());
     }
@@ -149,6 +199,7 @@ mod tests {
             output_path: "out.mkv".into(),
             kept_track_order: vec![0, 0],
             edits: vec![edit(0, 10, TrackType::Video), edit(0, 10, TrackType::Video)],
+            remove_attachments: vec![],
         };
         assert!(validate(&plan).is_err());
     }
@@ -160,6 +211,7 @@ mod tests {
             output_path: "out.mkv".into(),
             kept_track_order: vec![],
             edits: vec![],
+            remove_attachments: vec![],
         };
         assert!(validate(&plan).is_err());
     }

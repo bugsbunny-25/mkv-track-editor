@@ -125,6 +125,7 @@ async fn round_trips_reorder_and_removal_through_real_mkvmerge() {
                 flags: video.flags,
             },
         ],
+        remove_attachments: vec![],
     };
     let _ = subs; // only used to assert original track count above
 
@@ -189,6 +190,7 @@ async fn metadata_only_edit_takes_mkvpropedit_fast_path() {
         output_path: output.to_string_lossy().into_owned(),
         kept_track_order: original.tracks.iter().map(|t| t.id).collect(),
         edits,
+        remove_attachments: vec![],
     };
 
     assert_eq!(
@@ -257,4 +259,94 @@ async fn analyze_joins_mkvmerge_and_real_mediainfo_by_uid() {
         .find(|r| r.key == "Complete name")
         .unwrap();
     assert_eq!(complete_name.value, "sample.mkv", "absolute path must not leak");
+}
+
+/// Attaches a cover image and a font to the sample with mkvmerge.
+async fn with_attachments(dir: &Path, sample: &Path) -> PathBuf {
+    let cover = dir.join("cover.jpg");
+    let font = dir.join("font.ttf");
+    tokio::fs::write(&cover, b"not really a jpeg").await.unwrap();
+    tokio::fs::write(&font, b"not really a font").await.unwrap();
+    let out = dir.join("attached.mkv");
+    let status = Command::new("mkvmerge")
+        .arg("-q")
+        .arg("-o")
+        .arg(&out)
+        .args(["--attachment-mime-type", "image/jpeg", "--attach-file"])
+        .arg(&cover)
+        .args(["--attachment-mime-type", "font/ttf", "--attach-file"])
+        .arg(&font)
+        .arg(sample)
+        .stdout(Stdio::null())
+        .status()
+        .await
+        .expect("run mkvmerge");
+    assert!(status.success(), "mkvmerge failed to attach files");
+    out
+}
+
+#[tokio::test]
+async fn removes_image_attachments_and_keeps_fonts_on_both_paths() {
+    if !binary_available("mkvmerge").await
+        || !binary_available("mkvpropedit").await
+        || !binary_available("ffmpeg").await
+    {
+        eprintln!("skipping: mkvmerge/mkvpropedit/ffmpeg not available");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let sample = with_attachments(tmp.path(), &make_sample(tmp.path()).await).await;
+    let runner = TokioProcessRunner::new(ToolPaths::default());
+    let original = probe(&runner, &sample).await.expect("probe sample");
+    assert_eq!(original.attachments.len(), 2);
+    let images: Vec<_> = original.attachments.iter().filter(|a| a.is_image()).cloned().collect();
+    assert_eq!(images.len(), 1);
+
+    let edits = |tracks: &[mkv_types::TrackInfo]| -> Vec<TrackEdit> {
+        tracks
+            .iter()
+            .map(|t| TrackEdit {
+                id: t.id,
+                uid: t.uid,
+                track_type: t.track_type,
+                name: t.name.clone(),
+                language: t.language.clone(),
+                flags: t.flags,
+            })
+            .collect()
+    };
+    let all_ids: Vec<u64> = original.tracks.iter().map(|t| t.id).collect();
+    let no_subs: Vec<u64> = original
+        .tracks
+        .iter()
+        .filter(|t| t.track_type != TrackType::Subtitles)
+        .map(|t| t.id)
+        .collect();
+    let kept = |ids: &[u64]| -> Vec<mkv_types::TrackInfo> {
+        original.tracks.iter().filter(|t| ids.contains(&t.id)).cloned().collect()
+    };
+
+    // Metadata-only (mkvpropedit) and remux (mkvmerge) paths.
+    for (name, ids, strategy) in [
+        ("propedit.mkv", all_ids.clone(), ExecutionStrategy::MetadataOnly),
+        ("remux.mkv", no_subs.clone(), ExecutionStrategy::Remux),
+    ] {
+        let output = tmp.path().join(name);
+        let plan = RemuxPlan {
+            source_path: sample.to_string_lossy().into_owned(),
+            output_path: output.to_string_lossy().into_owned(),
+            kept_track_order: ids.clone(),
+            edits: edits(&kept(&ids)),
+            remove_attachments: images.clone(),
+        };
+        assert_eq!(mkv_core::plan::classify(&original, &plan), strategy);
+        execute_plan(&runner, &original, &plan, Box::new(|_p: JobProgress| {}))
+            .await
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+
+        let result = probe(&runner, &output).await.expect("probe output");
+        let names: Vec<&str> = result.attachments.iter().map(|a| a.file_name.as_str()).collect();
+        assert_eq!(names, ["font.ttf"], "{name}: only the image is removed");
+    }
 }

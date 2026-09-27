@@ -17,7 +17,43 @@ fn config_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Apps started from Finder or the Dock get a bare PATH (/usr/bin:/bin:…),
+/// and LaunchServices doesn't always apply the bundle's LSEnvironment, so
+/// Homebrew's mkvmerge/mediainfo wouldn't be found. Append Homebrew's bin
+/// directories when they're missing.
+#[cfg(target_os = "macos")]
+fn add_homebrew_to_path() {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths: Vec<PathBuf> = std::env::split_paths(&current).collect();
+    for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
+        if !paths.iter().any(|p| p == std::path::Path::new(dir)) {
+            paths.push(PathBuf::from(dir));
+        }
+    }
+    if let Ok(joined) = std::env::join_paths(paths) {
+        // Called first thing in `main`, before any other thread (the tokio
+        // runtime included) exists.
+        std::env::set_var("PATH", joined);
+    }
+}
+
+/// Reports a fatal startup error on stderr and, since a Finder launch has no
+/// terminal, in a dialog.
+fn fatal(message: &str) -> ! {
+    eprintln!("error: {message}");
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("MKV Track Editor can't start")
+        .set_description(message)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+    std::process::exit(1);
+}
+
 fn main() {
+    #[cfg(target_os = "macos")]
+    add_homebrew_to_path();
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -34,13 +70,10 @@ fn main() {
                 tracing::warn!("{warning}");
             }
         }
-        Err(e) => {
-            eprintln!(
-                "error: {e}\n\nmkvmerge and mkvpropedit (MKVToolNix) and mediainfo (MediaInfo CLI) must be \
-                 installed and on PATH (or set MKV_MKVMERGE_BIN / MKV_MKVPROPEDIT_BIN / MKV_MEDIAINFO_BIN)."
-            );
-            std::process::exit(1);
-        }
+        Err(e) => fatal(&format!(
+            "{e}\n\nmkvmerge and mkvpropedit (MKVToolNix) and mediainfo (MediaInfo CLI) must be installed and on \
+             PATH (or set MKV_MKVMERGE_BIN / MKV_MKVPROPEDIT_BIN / MKV_MEDIAINFO_BIN)."
+        )),
     }
 
     let config_path = config_store::config_file(&config_dir());

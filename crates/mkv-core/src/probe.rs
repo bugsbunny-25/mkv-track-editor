@@ -1,6 +1,6 @@
 use crate::error::CoreError;
 use crate::process::ProcessRunner;
-use mkv_types::{ContainerInfo, ProbeResult, TrackFlags, TrackInfo, TrackType};
+use mkv_types::{AttachmentInfo, ContainerInfo, ProbeResult, TrackFlags, TrackInfo, TrackType};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -10,6 +10,26 @@ struct RawIdentify {
     container: RawContainer,
     #[serde(default)]
     tracks: Vec<RawTrack>,
+    #[serde(default)]
+    attachments: Vec<RawAttachment>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawAttachment {
+    id: u64,
+    #[serde(default)]
+    file_name: String,
+    #[serde(default)]
+    content_type: String,
+    #[serde(default)]
+    size: u64,
+    #[serde(default)]
+    properties: RawAttachmentProperties,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawAttachmentProperties {
+    uid: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -100,12 +120,31 @@ pub(crate) fn parse_identify_json(raw_json: &str) -> Result<ProbeResult, CoreErr
         })
         .collect();
 
+    let attachments = raw
+        .attachments
+        .into_iter()
+        .filter_map(|a| {
+            let Some(uid) = a.properties.uid else {
+                tracing::warn!(attachment_id = a.id, "attachment has no UID, skipping");
+                return None;
+            };
+            Some(AttachmentInfo {
+                id: a.id,
+                uid,
+                file_name: a.file_name,
+                mime_type: a.content_type,
+                size: a.size,
+            })
+        })
+        .collect();
+
     Ok(ProbeResult {
         container: ContainerInfo {
             title: raw.container.properties.title,
             duration_ns: raw.container.properties.duration,
         },
         tracks,
+        attachments,
     })
 }
 
@@ -139,6 +178,10 @@ mod tests {
           "id": 3, "type": "buttons", "codec": "VobBtn",
           "properties": { "uid": 444, "number": 4 }
         }
+      ],
+      "attachments": [
+        { "id": 1, "file_name": "cover.jpg", "content_type": "image/jpeg", "size": 477, "properties": { "uid": 17232074509077980272 } },
+        { "id": 2, "file_name": "font.ttf", "content_type": "font/ttf", "size": 8, "properties": { "uid": 555 } }
       ]
     }"#;
 
@@ -163,6 +206,18 @@ mod tests {
         assert_eq!(result.tracks[2].language.as_deref(), Some("fre"));
         assert!(result.tracks[2].flags.forced);
         assert!(result.tracks[2].flags.hearing_impaired);
+
+        assert_eq!(result.attachments.len(), 2);
+        assert_eq!(result.attachments[0].uid, 17232074509077980272);
+        assert_eq!(result.attachments[0].file_name, "cover.jpg");
+        assert!(result.attachments[0].is_image());
+        assert!(!result.attachments[1].is_image());
+    }
+
+    #[test]
+    fn attachments_are_optional() {
+        let result = parse_identify_json(r#"{ "tracks": [] }"#).unwrap();
+        assert!(result.attachments.is_empty());
     }
 
     #[tokio::test]

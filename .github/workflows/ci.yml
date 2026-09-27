@@ -3,9 +3,11 @@ name: CI
 # Pull requests: tests + web and desktop builds (nothing is kept).
 # main:          the same, plus desktop archives (workflow artifacts) and the
 #                multi-arch Alpine image tagged :main and :sha-<commit>.
-# release/X.Y.Z: the same, plus image tags :X.Y.Z, :X.Y and :latest, a
-#                GitHub release in the public Homebrew tap repository and an
-#                updated tap formula. X.Y.Z must match Cargo.toml's version.
+# release/X.Y.Z: the same, plus image tags :X.Y.Z, :X.Y and :latest, a vX.Y.Z
+#                tag and GitHub release in this repository, a GitHub release
+#                in the public Homebrew tap repository and an updated tap
+#                cask (macOS) and formula (Linux). X.Y.Z must match
+#                Cargo.toml's version.
 on:
   pull_request:
   push:
@@ -41,7 +43,7 @@ jobs:
       publish: ${{ steps.version.outputs.publish }}
       release: ${{ steps.version.outputs.release }}
       # This release is the highest X.Y.Z overall / within its X.Y, so it
-      # moves :latest (and the Homebrew formula) / :X.Y. A fix pushed to an
+      # moves :latest (and the Homebrew cask and formula) / :X.Y. A fix pushed to an
       # older release branch doesn't move them back.
       latest: ${{ steps.version.outputs.latest }}
       latest-minor: ${{ steps.version.outputs.latest-minor }}
@@ -243,9 +245,53 @@ jobs:
             $(printf "$IMAGE@sha256:%s " *)
       - run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
 
+  github-release:
+    name: GitHub release
+    needs: [meta, test, web, desktop, docker-manifest]
+    if: needs.meta.outputs.release == 'true'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: mkv-track-editor-*
+          merge-multiple: true
+      # Pushing to the same release branch again republishes this version,
+      # so the tag follows the branch. A tag push doesn't start this
+      # workflow (it only runs for branches).
+      - name: Tag the release commit
+        run: |
+          git tag -f "v$VERSION" "$GITHUB_SHA"
+          git push -f origin "refs/tags/v$VERSION"
+      - name: Publish the release
+        run: |
+          tag="v$VERSION"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            cat > "$RUNNER_TEMP/notes.md" <<EOF
+          ## Install
+
+          - macOS (Apple silicon): \`brew install --cask $TAP/mkv-track-editor\`
+          - Linux (x86_64, arm64): \`brew install $TAP/mkv-track-editor\`
+          - Docker: \`docker pull $IMAGE:$VERSION\`
+
+          EOF
+            gh release create "$tag" --verify-tag \
+              --latest="${{ needs.meta.outputs.latest }}" \
+              --title "MKV Track Editor $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --generate-notes
+          fi
+          gh release upload "$tag" --clobber dist/*.tar.gz dist/*.sha256
+
   homebrew:
     name: Homebrew release
-    needs: [meta, test, web, desktop, docker-manifest]
+    needs: [meta, test, web, desktop, docker-manifest, github-release]
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-26.04
     env:
@@ -266,32 +312,35 @@ jobs:
             gh release create "$tag" --repo "$TAP_REPO" \
               --latest="${{ needs.meta.outputs.latest }}" \
               --title "MKV Track Editor $VERSION" \
-              --notes "Desktop builds of MKV Track Editor $VERSION. Install with \`brew install $TAP/mkv-track-editor\`. Docker: \`$IMAGE:$VERSION\`."
+              --notes "Desktop builds of MKV Track Editor $VERSION. Install with \`brew install --cask $TAP/mkv-track-editor\` (macOS) or \`brew install $TAP/mkv-track-editor\` (Linux). Docker: \`$IMAGE:$VERSION\`."
           fi
           # Pushing to the same release branch again republishes this version.
           gh release upload "$tag" --repo "$TAP_REPO" --clobber dist/*.tar.gz dist/*.sha256
-      - name: Render formula
+      - name: Render cask and formula
         run: |
           sha() { cut -d' ' -f1 "dist/mkv-track-editor-$VERSION-$1.tar.gz.sha256"; }
+          mkdir -p "$RUNNER_TEMP/Casks" "$RUNNER_TEMP/Formula"
           SHA256_MACOS_ARM64=$(sha macos-arm64) \
+            packaging/homebrew/render-cask.sh > "$RUNNER_TEMP/Casks/mkv-track-editor.rb"
           SHA256_LINUX_X86_64=$(sha linux-x86_64) \
           SHA256_LINUX_ARM64=$(sha linux-arm64) \
-            packaging/homebrew/render-formula.sh > "$RUNNER_TEMP/mkv-track-editor.rb"
+            packaging/homebrew/render-formula.sh > "$RUNNER_TEMP/Formula/mkv-track-editor.rb"
       - if: needs.meta.outputs.latest == 'true'
         uses: actions/checkout@v7
         with:
           repository: ${{ env.TAP_REPO }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
-      - name: Commit formula to the tap
+      - name: Commit cask and formula to the tap
         if: needs.meta.outputs.latest == 'true'
         working-directory: tap
         run: |
-          mkdir -p Formula
-          cp "$RUNNER_TEMP/mkv-track-editor.rb" Formula/mkv-track-editor.rb
-          git add Formula/mkv-track-editor.rb
+          mkdir -p Casks Formula
+          cp "$RUNNER_TEMP/Casks/mkv-track-editor.rb" Casks/mkv-track-editor.rb
+          cp "$RUNNER_TEMP/Formula/mkv-track-editor.rb" Formula/mkv-track-editor.rb
+          git add Casks/mkv-track-editor.rb Formula/mkv-track-editor.rb
           if git diff --cached --quiet; then
-            echo "Formula unchanged"
+            echo "Cask and formula unchanged"
             exit 0
           fi
           git -c user.name="github-actions[bot]" \
@@ -326,9 +375,21 @@ jobs:
       # binaries: Encoding::CompatibilityError in `patch!`).
       - run: brew update
       - run: brew tap "$TAP"
-      - run: brew install "$TAP/mkv-track-editor"
-      - run: brew test "$TAP/mkv-track-editor"
-      - run: |
-          version=$(brew list --versions mkv-track-editor)
+      # macOS: the cask puts the app in /Applications. Its first launch
+      # needs "Open Anyway" (the app isn't notarized), so check the install
+      # and the bundle signature rather than running it.
+      - if: runner.os == 'macOS'
+        run: |
+          brew install --cask "$TAP/mkv-track-editor"
+          codesign --verify --strict --verbose=2 "/Applications/MKV Track Editor.app"
+          [[ -x "$(brew --prefix)/bin/mkv-track-editor" ]]
+          version=$(brew list --cask --versions mkv-track-editor)
+          echo "$version"
+          [[ "$version" == "mkv-track-editor ${{ needs.meta.outputs.version }}" ]]
+      - if: runner.os == 'Linux'
+        run: |
+          brew install "$TAP/mkv-track-editor"
+          brew test "$TAP/mkv-track-editor"
+          version=$(brew list --formula --versions mkv-track-editor)
           echo "$version"
           [[ "$version" == "mkv-track-editor ${{ needs.meta.outputs.version }}" ]]

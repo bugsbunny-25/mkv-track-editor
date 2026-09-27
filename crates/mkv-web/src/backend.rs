@@ -5,7 +5,9 @@
 
 use gloo_net::http::{Request, Response};
 use mkv_profiles::AppConfig;
-use mkv_types::{DirListing, FileAnalysis, JobId, JobOutcome, JobPhase, JobProgress, RootInfo, TrackEdit};
+use mkv_types::{
+    AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobPhase, JobProgress, RootInfo, TrackEdit,
+};
 use mkv_ui::{Backend, BackendCapabilities, ProgressCallback, SourceRef, UiCallback, UiError};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -147,6 +149,7 @@ impl Backend for WebBackend {
         output: SourceRef,
         kept_track_order: Vec<u64>,
         edits: Vec<TrackEdit>,
+        remove_attachments: Vec<AttachmentInfo>,
         cb: UiCallback<JobId>,
     ) {
         let (SourceRef::ServerPath { root_id, path: source_path }, SourceRef::ServerPath { path: output_path, .. }) =
@@ -163,6 +166,7 @@ impl Backend for WebBackend {
             output_path: String,
             kept_track_order: Vec<u64>,
             edits: Vec<TrackEdit>,
+            remove_attachments: Vec<AttachmentInfo>,
         }
         #[derive(serde::Deserialize)]
         struct Resp {
@@ -176,6 +180,7 @@ impl Backend for WebBackend {
                 output_path,
                 kept_track_order,
                 edits,
+                remove_attachments,
             };
             let resp: Resp = post_json("/api/jobs", &body).await?;
             Ok(resp.job_id)

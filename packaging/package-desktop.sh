@@ -40,6 +40,7 @@ case "$platform" in
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleDisplayName</key><string>MKV Track Editor</string>
   <key>CFBundleExecutable</key><string>mkv-track-editor</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>io.github.bugsbunny-25.mkv-track-editor</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>MKV Track Editor</string>
@@ -56,6 +57,29 @@ case "$platform" in
 </dict>
 </plist>
 EOF
+
+    # App icon. packaging/icon/*.png are rendered from the .svg files next
+    # to them (qlmanage -t -s 1024 -o <dir> app-icon.svg); the 16 and 32 px
+    # sizes use the simplified artwork, which stays legible that small.
+    iconset="$stage/AppIcon.iconset"
+    mkdir -p "$iconset" "$app/Resources"
+    icon() { sips -z "$2" "$2" "$root/packaging/icon/$1" --out "$iconset/$3" >/dev/null; }
+    icon app-icon-small-256.png 16 icon_16x16.png
+    icon app-icon-small-256.png 32 icon_16x16@2x.png
+    icon app-icon-small-256.png 32 icon_32x32.png
+    for size in 32 128 256 512; do
+      icon app-icon-1024.png $((size * 2)) "icon_${size}x${size}@2x.png"
+      [[ $size == 32 ]] || icon app-icon-1024.png "$size" "icon_${size}x${size}.png"
+    done
+    iconutil -c icns -o "$app/Resources/AppIcon.icns" "$iconset"
+    rm -rf "$iconset"
+
+    # Sign the whole bundle (ad hoc: no Apple Developer ID). The linker only
+    # signs the binary, leaving Info.plist unbound and resources unsealed;
+    # macOS then refuses to open the app from Finder. Everything in the
+    # bundle must be in place before this.
+    codesign --force --sign - "$stage/MKV Track Editor.app"
+    codesign --verify --strict --verbose=2 "$stage/MKV Track Editor.app"
     ;;
   linux-*)
     install -m 0755 "$binary" "$stage/mkv-track-editor"

@@ -74,6 +74,16 @@ easy to get wrong here.
   `Cargo.toml` (see the header of `.github/workflows/ci.yml`); only do it
   after the `main` run, including both images, is green. Pushing the same
   release branch again republishes that version.
+- A release run tags `vX.Y.Z` and creates a GitHub release here, then
+  publishes the archives to the tap repo with a **cask** for macOS
+  (`packaging/homebrew/render-cask.sh`, installs the app into
+  /Applications) and a **Linux-only formula** (`render-formula.sh`).
+- The macOS bundle must be signed as a whole (`codesign --sign -` in
+  `packaging/package-desktop.sh`, after the Info.plist and icon are in
+  place). The linker's signature covers only the binary, and macOS then
+  refuses to open the app from Finder. It's ad hoc, not notarized: users
+  click "Open Anyway" once per install. Don't strip the quarantine flag in
+  the cask.
 - The Linux formula patches the binary's interpreter and RPATH at install
   time with Homebrew's patchelf.rb. patchelf.rb 1.6.2 (on stale Homebrew
   installs, like the x86_64 runner image) crashes adding an RPATH to the

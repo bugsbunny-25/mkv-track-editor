@@ -6,9 +6,10 @@ use crate::backend::SourceRef;
 use mkv_profiles::labels::{audio_attrs, video_attrs, DynamicRange};
 use mkv_profiles::lang;
 use mkv_profiles::{
-    apply_profile, guess_original_language, render_file_name, summarize, AppConfig, MediaSummary, NamingMetadata,
+    apply_profile, guess_original_language, render_file_name, summarize, track_name, AppConfig, MediaSummary,
+    NamingMetadata,
 };
-use mkv_types::{FileAnalysis, JobId, TrackEdit, TrackFlags, TrackType};
+use mkv_types::{is_image_codec, AttachmentInfo, FileAnalysis, JobId, TrackEdit, TrackFlags, TrackType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
@@ -128,13 +129,29 @@ impl Document {
     }
 
     pub fn has_changes(&self) -> bool {
-        self.rows != self.original_rows()
+        self.rows != self.original_rows() || !self.removed_attachments().is_empty()
     }
 
-    /// Rows that differ from the file on disk: dropped, edited or moved.
+    /// Rows that differ from the file on disk (dropped, edited or moved),
+    /// plus attachments being removed.
     pub fn change_count(&self) -> usize {
         let original = self.original_rows();
-        self.rows.iter().zip(&original).filter(|(row, orig)| row != orig).count()
+        let rows = self.rows.iter().zip(&original).filter(|(row, orig)| row != orig).count();
+        rows + self.removed_attachments().len()
+    }
+
+    /// Attachments left out of the saved file: every image (cover art).
+    /// Fonts and other attachments are kept — styled subtitles need them.
+    pub fn removed_attachments(&self) -> Vec<AttachmentInfo> {
+        self.analysis.probe.attachments.iter().filter(|a| a.is_image()).cloned().collect()
+    }
+
+    /// Banner lines for the attachments being removed.
+    fn attachment_notices(&self) -> Vec<String> {
+        self.removed_attachments()
+            .iter()
+            .map(|a| format!("The image attachment \u{201c}{}\u{201d} will be removed.", a.file_name))
+            .collect()
     }
 
     /// Title for the document header: "Title (Year)" from the naming
@@ -161,11 +178,14 @@ impl Document {
         let codec_of = |uid: u64| {
             self.analysis.probe.tracks.iter().find(|t| t.uid == uid).map(|t| t.codec.as_str()).unwrap_or_default()
         };
+        // Cover-art tracks never describe the file's video.
+        let is_image = |r: &&Row| is_image_codec(codec_of(r.edit.uid));
         let first = |t: TrackType| {
-            self.rows
-                .iter()
-                .find(|r| r.keep && r.edit.track_type == t)
-                .or_else(|| self.rows.iter().find(|r| r.edit.track_type == t))
+            let of_type = || self.rows.iter().filter(move |r| r.edit.track_type == t);
+            of_type()
+                .find(|r| r.keep && !is_image(r))
+                .or_else(|| of_type().find(|r| !is_image(r)))
+                .or_else(|| of_type().next())
         };
 
         if let Some(row) = first(TrackType::Video) {
@@ -208,6 +228,7 @@ impl Document {
         self.profile = profile.name.clone();
         let outcome = apply_profile(&self.analysis, profile, &config.labels, self.original_language.as_deref());
         self.warnings = outcome.warnings;
+        self.warnings.extend(self.attachment_notices());
         self.rows = outcome
             .tracks
             .into_iter()
@@ -218,7 +239,7 @@ impl Document {
 
     pub fn reset(&mut self, config: &AppConfig) {
         self.rows = self.original_rows();
-        self.warnings.clear();
+        self.warnings = self.attachment_notices();
         self.refresh_output_name(config);
     }
 
@@ -273,17 +294,45 @@ impl Document {
         }
     }
 
-    pub fn set_language(&mut self, row: usize, language: &str, config: &AppConfig) {
-        if let Some(r) = self.rows.get_mut(row) {
-            r.edit.language = (!language.trim().is_empty()).then(|| language.trim().to_string());
+    /// The current profile's name for a row in its current state, or `None`
+    /// when the profile doesn't name it.
+    fn auto_name(&self, row: usize, config: &AppConfig) -> Option<String> {
+        let profile = config.profile(&self.profile).or_else(|| config.profiles.first())?;
+        track_name(&self.analysis, profile, &config.labels, &self.rows.get(row)?.edit)
+    }
+
+    /// Runs `edit` on a row; if the row's name was the profile's
+    /// auto-generated one (not typed by the user), renames it to match the
+    /// edited language and flags — e.g. "English" → "English SDH".
+    fn edit_named(&mut self, row: usize, config: &AppConfig, edit: impl FnOnce(&mut Self)) {
+        let untouched = self.rows.get(row).is_some_and(|r| r.edit.name.is_some())
+            && self.rows[row].edit.name == self.auto_name(row, config);
+        edit(self);
+        if untouched {
+            if let Some(name) = self.auto_name(row, config) {
+                self.rows[row].edit.name = Some(name);
+            }
         }
+    }
+
+    pub fn set_language(&mut self, row: usize, language: &str, config: &AppConfig) {
+        self.edit_named(row, config, |doc| {
+            if let Some(r) = doc.rows.get_mut(row) {
+                r.edit.language = (!language.trim().is_empty()).then(|| language.trim().to_string());
+            }
+        });
         self.refresh_output_name(config);
     }
 
     /// Setting "default" on one track clears it on the other tracks of the
     /// same type — players pick the first default anyway, so more than one
-    /// is almost always a mistake.
-    pub fn set_flag(&mut self, row: usize, flag: Flag, value: bool) {
+    /// is almost always a mistake. An auto-generated name follows the flags.
+    pub fn set_flag(&mut self, row: usize, flag: Flag, value: bool, config: &AppConfig) {
+        self.edit_named(row, config, |doc| doc.apply_flag(row, flag, value));
+        self.refresh_output_name(config);
+    }
+
+    fn apply_flag(&mut self, row: usize, flag: Flag, value: bool) {
         let Some(track_type) = self.rows.get(row).map(|r| r.edit.track_type) else { return };
         if flag == Flag::Default && value {
             for (i, r) in self.rows.iter_mut().enumerate() {
@@ -429,6 +478,7 @@ mod tests {
                     track(4, TrackType::Subtitles, "eng", "SubRip/SRT"),
                     track(5, TrackType::Subtitles, "fre", "SubRip/SRT"),
                 ],
+                attachments: vec![],
             },
             media: MediaAnalysis {
                 tracks: vec![
@@ -511,13 +561,96 @@ mod tests {
     fn default_flag_is_exclusive_per_track_type() {
         let (mut doc, config) = open();
         doc.reset(&config);
-        doc.set_flag(1, Flag::Default, true);
-        doc.set_flag(2, Flag::Default, true);
+        doc.set_flag(1, Flag::Default, true, &config);
+        doc.set_flag(2, Flag::Default, true, &config);
         assert!(!doc.rows[1].edit.flags.default && doc.rows[2].edit.flags.default);
-        doc.set_flag(4, Flag::Default, true);
+        doc.set_flag(4, Flag::Default, true, &config);
         assert!(doc.rows[2].edit.flags.default, "other types unaffected");
-        doc.set_flag(4, Flag::HearingImpaired, true);
+        doc.set_flag(4, Flag::HearingImpaired, true, &config);
         assert!(doc.rows[4].edit.flags.hearing_impaired);
+    }
+
+    /// Index of the kept row with this mkvmerge track id.
+    fn row_of(doc: &Document, id: u64) -> usize {
+        doc.rows.iter().position(|r| r.edit.id == id).unwrap()
+    }
+
+    #[test]
+    fn auto_names_follow_flags_and_language() {
+        let (mut doc, config) = open();
+        let sub = row_of(&doc, 4);
+        assert_eq!(doc.rows[sub].edit.name.as_deref(), Some("English"));
+
+        doc.set_flag(sub, Flag::HearingImpaired, true, &config);
+        assert_eq!(doc.rows[sub].edit.name.as_deref(), Some("English SDH"));
+        doc.set_flag(sub, Flag::Forced, true, &config);
+        assert_eq!(doc.rows[sub].edit.name.as_deref(), Some("English Forced"));
+        doc.set_flag(sub, Flag::Forced, false, &config);
+        doc.set_flag(sub, Flag::HearingImpaired, false, &config);
+        assert_eq!(doc.rows[sub].edit.name.as_deref(), Some("English"));
+
+        doc.set_language(sub, "fr", &config);
+        assert_eq!(doc.rows[sub].edit.name.as_deref(), Some("French"));
+
+        let audio = row_of(&doc, 1);
+        doc.set_flag(audio, Flag::Commentary, true, &config);
+        assert!(doc.rows[audio].edit.name.as_deref().unwrap().ends_with(" Commentary"));
+    }
+
+    #[test]
+    fn typed_names_are_left_alone() {
+        let (mut doc, config) = open();
+        let sub = row_of(&doc, 4);
+        doc.set_name(sub, "My subs");
+        doc.set_flag(sub, Flag::HearingImpaired, true, &config);
+        assert_eq!(doc.rows[sub].edit.name.as_deref(), Some("My subs"));
+
+        // A file's own names (after reset) aren't the profile's either.
+        doc.reset(&config);
+        doc.set_flag(sub, Flag::HearingImpaired, true, &config);
+        assert_eq!(doc.rows[sub].edit.name, None);
+    }
+
+    fn with_cover_art() -> FileAnalysis {
+        let mut a = analysis();
+        // ffmpeg stores cover art as a one-frame MJPEG video track, and some
+        // files mark it default.
+        let mut cover = track(6, TrackType::Video, "und", "V_MJPEG");
+        cover.flags.default = true;
+        a.probe.tracks.insert(0, cover);
+        let attachment = |id: u64, file_name: &str, mime_type: &str| AttachmentInfo {
+            id,
+            uid: 900 + id,
+            file_name: file_name.into(),
+            mime_type: mime_type.into(),
+            size: 1,
+        };
+        a.probe.attachments = vec![attachment(1, "cover.jpg", "image/jpeg"), attachment(2, "font.ttf", "font/ttf")];
+        a
+    }
+
+    #[test]
+    fn cover_art_tracks_and_image_attachments_are_removed() {
+        let config = AppConfig::default();
+        let source = SourceRef::LocalPath("/lib/Movie.2020.1080p.BluRay.x264-GRP.mkv".into());
+        let mut doc = Document::open(1, source, with_cover_art(), &config);
+
+        let cover = &doc.rows[row_of(&doc, 6)];
+        assert!(!cover.keep, "cover art track is dropped");
+        let video = doc.kept().into_iter().find(|e| e.track_type == TrackType::Video).unwrap();
+        assert_eq!(video.id, 0);
+        assert!(video.flags.default);
+        assert_eq!(doc.header_facts()[0].text, "1080p");
+
+        let removed: Vec<String> = doc.removed_attachments().into_iter().map(|a| a.file_name).collect();
+        assert_eq!(removed, ["cover.jpg"], "fonts are kept");
+        assert!(doc.warnings.iter().any(|w| w.contains("cover.jpg")));
+
+        // Resetting the tracks still removes the image, so there's a change.
+        doc.reset(&config);
+        assert!(doc.has_changes());
+        assert_eq!(doc.change_count(), 1);
+        assert_eq!(doc.header_facts()[0].text, "1080p", "even when the cover track is kept");
     }
 
     #[test]

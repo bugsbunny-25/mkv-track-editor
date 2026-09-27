@@ -9,7 +9,7 @@ pub mod naming;
 pub mod release;
 pub mod template;
 
-pub use apply::{apply_profile, guess_original_language, ProfileOutcome, TrackProposal};
+pub use apply::{apply_profile, guess_original_language, track_name, ProfileOutcome, TrackProposal};
 pub use config::{AppConfig, ConfigError, Profile, SubtitleKind};
 pub use naming::{render_file_name, summarize, MediaSummary, NamingMetadata};
 pub use release::{MediaKind, QualitySource, Revision};

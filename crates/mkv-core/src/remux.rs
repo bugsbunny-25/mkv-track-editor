@@ -55,6 +55,14 @@ pub fn build_mkvmerge_args(plan: &RemuxPlan) -> Vec<String> {
         .join(",");
     args.push(order);
 
+    // Every attachment not listed is copied, so fonts for styled subtitles
+    // survive while cover images are dropped.
+    if !plan.remove_attachments.is_empty() {
+        args.push("--attachments".to_string());
+        let ids: Vec<String> = plan.remove_attachments.iter().map(|a| a.id.to_string()).collect();
+        args.push(format!("!{}", ids.join(",")));
+    }
+
     args.push(plan.source_path.clone());
     args
 }
@@ -92,7 +100,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mkv_types::{TrackEdit, TrackFlags};
+    use mkv_types::{AttachmentInfo, TrackEdit, TrackFlags};
 
     fn edit(id: u64, uid: u64, t: TrackType) -> TrackEdit {
         TrackEdit {
@@ -116,6 +124,7 @@ mod tests {
                 edit(0, 10, TrackType::Video),
                 edit(2, 12, TrackType::Audio),
             ],
+            remove_attachments: vec![],
         };
         let args = build_mkvmerge_args(&plan);
 
@@ -151,6 +160,7 @@ mod tests {
                     ..TrackFlags::default()
                 },
             }],
+            remove_attachments: vec![],
         };
         let args = build_mkvmerge_args(&plan);
 
@@ -169,6 +179,31 @@ mod tests {
         let src_pos = args.iter().position(|a| a == "/in.mkv").unwrap();
         let last_flag = args.iter().rposition(|a| a == "--commentary-flag").unwrap();
         assert!(last_flag < src_pos);
+    }
+
+    #[test]
+    fn drops_only_the_listed_attachments() {
+        let cover = AttachmentInfo {
+            id: 1,
+            uid: 501,
+            file_name: "cover.jpg".into(),
+            mime_type: "image/jpeg".into(),
+            size: 10,
+        };
+        let poster = AttachmentInfo { id: 3, uid: 503, file_name: "poster.png".into(), ..cover.clone() };
+        let plan = RemuxPlan {
+            source_path: "/in.mkv".into(),
+            output_path: "/out.mkv".into(),
+            kept_track_order: vec![0],
+            edits: vec![edit(0, 10, TrackType::Video)],
+            remove_attachments: vec![cover, poster],
+        };
+        let args = build_mkvmerge_args(&plan);
+        assert!(args.windows(2).any(|w| w == ["--attachments", "!1,3"]));
+        assert_eq!(args.last().unwrap(), "/in.mkv");
+
+        let keep_all = RemuxPlan { remove_attachments: vec![], ..plan };
+        assert!(!build_mkvmerge_args(&keep_all).contains(&"--attachments".to_string()));
     }
 
     #[tokio::test]
@@ -190,6 +225,7 @@ mod tests {
             output_path: "/out.mkv".into(),
             kept_track_order: vec![0],
             edits: vec![edit(0, 10, TrackType::Video)],
+            remove_attachments: vec![],
         };
 
         let seen = Arc::new(Mutex::new(Vec::new()));
