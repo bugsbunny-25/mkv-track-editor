@@ -181,8 +181,17 @@ export component TrackInspector inherits Card {
             }
         }
 
+        // A ScrollView sizes its content to a layout's *minimum* height by
+        // default, which is shorter than the flags list once descriptions
+        // wrap, so nothing scrolled. Pin the body to the top at its full
+        // height and scroll that.
         if root.has-track && root.scrolls: scroll := ScrollView {
-            InspectorBody { width: scroll.visible-width; }
+            content-height: body.height;
+            body := InspectorBody {
+                y: 0;
+                width: scroll.visible-width;
+                height: max(self.min-height, self.preferred-height);
+            }
         }
         if root.has-track && !root.scrolls: InspectorBody { }
     }

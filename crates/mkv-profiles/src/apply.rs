@@ -85,6 +85,107 @@ fn base_edit(track: &TrackInfo) -> TrackEdit {
     }
 }
 
+fn video_tokens(analysis: &FileAnalysis, track: &TrackInfo, labels: &LabelOverrides, language: Option<&str>) -> Tokens {
+    let attrs = video_attrs(analysis.media.track(track.uid), &track.codec);
+    let mut tokens = Tokens::new();
+    tokens
+        .set("Resolution", attrs.resolution.clone().unwrap_or_default())
+        .set("DynamicRange", LabelOverrides::apply(&labels.dynamic_range, &attrs.dynamic_range.label()))
+        .set("Codec", LabelOverrides::apply(&labels.video_codec, &attrs.codec))
+        .set("BitDepth", attrs.bit_depth.map(|b| format!("{b}bit")).unwrap_or_default())
+        .set("3D", if attrs.is_3d { "3D" } else { "" })
+        .set("Language", language.map(lang::display_name).unwrap_or_default());
+    tokens
+}
+
+fn audio_tokens(
+    analysis: &FileAnalysis,
+    track: &TrackInfo,
+    labels: &LabelOverrides,
+    language: Option<&str>,
+    role: AudioRole,
+) -> Tokens {
+    let attrs = audio_attrs(analysis.media.track(track.uid), &track.codec);
+    let mut tokens = Tokens::new();
+    tokens
+        .set("Language", language.map(lang::display_name).unwrap_or_default())
+        .set("Format", LabelOverrides::apply(&labels.audio_format, &attrs.format))
+        .set("Channels", attrs.channels.clone().unwrap_or_default())
+        .set("Atmos", if attrs.atmos { "Atmos" } else { "" })
+        .set("Commentary", if role == AudioRole::Commentary { "Commentary" } else { "" })
+        .set("Description", if role == AudioRole::Description { "Audio Description" } else { "" });
+    tokens
+}
+
+fn subtitle_tokens(
+    analysis: &FileAnalysis,
+    track: &TrackInfo,
+    labels: &LabelOverrides,
+    language: Option<&str>,
+    kind: SubtitleKind,
+) -> Tokens {
+    let mut tokens = Tokens::new();
+    tokens
+        .set("Language", language.map(lang::display_name).unwrap_or_default())
+        .set("Kind", LabelOverrides::apply(&labels.subtitle_kind, kind.label()))
+        .set("Format", subtitle_format(analysis.media.track(track.uid), &track.codec));
+    tokens
+}
+
+/// The profile's name for a track in its *current* state — its edited
+/// language and flags rather than the source's — so the UI can keep an
+/// auto-generated name in step when the user toggles a flag. Mirrors the
+/// naming in [`apply_profile`]: for a track it proposed, the result equals
+/// the name it proposed.
+pub fn track_name(
+    analysis: &FileAnalysis,
+    profile: &Profile,
+    labels: &LabelOverrides,
+    edit: &TrackEdit,
+) -> Option<String> {
+    let track = analysis.probe.tracks.iter().find(|t| t.uid == edit.uid)?;
+    let language = edit
+        .language
+        .as_deref()
+        .filter(|l| !lang::is_undetermined(l))
+        .map(lang::canonical)
+        .or_else(|| track_language(track, analysis));
+    let language = language.as_deref();
+    let flags = &edit.flags;
+    match edit.track_type {
+        TrackType::Video => name(&profile.video.name_format, &video_tokens(analysis, track, labels, language)),
+        TrackType::Audio => {
+            let role = if flags.commentary {
+                AudioRole::Commentary
+            } else if flags.visual_impaired {
+                AudioRole::Description
+            } else {
+                AudioRole::Main
+            };
+            name(&profile.audio.name_format, &audio_tokens(analysis, track, labels, language, role))
+        }
+        TrackType::Subtitles => {
+            let cfg = &profile.subtitle;
+            // Flags can't tell CC from SDH, or mark Signs & Songs; the title
+            // still can.
+            let untagged = TrackInfo { flags: TrackFlags::default(), ..track.clone() };
+            let from_title = subtitle_kind(&untagged, &SubtitlePatterns::new(cfg));
+            let kind = if flags.commentary {
+                SubtitleKind::Commentary
+            } else if flags.forced {
+                SubtitleKind::Forced
+            } else if flags.hearing_impaired {
+                if from_title == SubtitleKind::Cc { SubtitleKind::Cc } else { SubtitleKind::Sdh }
+            } else if from_title == SubtitleKind::SignsSongs {
+                SubtitleKind::SignsSongs
+            } else {
+                SubtitleKind::Full
+            };
+            name(&cfg.name_format, &subtitle_tokens(analysis, track, labels, language, kind))
+        }
+    }
+}
+
 pub fn apply_profile(
     analysis: &FileAnalysis,
     profile: &Profile,
@@ -99,18 +200,11 @@ pub fn apply_profile(
 
     let of_type = |t: TrackType| analysis.probe.tracks.iter().filter(move |x| x.track_type == t);
 
-    // --- Video: keep all, rename, default on the first. -------------------
-    for (i, track) in of_type(TrackType::Video).enumerate() {
-        let media = analysis.media.track(track.uid);
-        let attrs = video_attrs(media, &track.codec);
-        let mut tokens = Tokens::new();
-        tokens
-            .set("Resolution", attrs.resolution.clone().unwrap_or_default())
-            .set("DynamicRange", LabelOverrides::apply(&labels.dynamic_range, &attrs.dynamic_range.label()))
-            .set("Codec", LabelOverrides::apply(&labels.video_codec, &attrs.codec))
-            .set("BitDepth", attrs.bit_depth.map(|b| format!("{b}bit")).unwrap_or_default())
-            .set("3D", if attrs.is_3d { "3D" } else { "" })
-            .set("Language", track_language(track, analysis).map(|l| lang::display_name(&l)).unwrap_or_default());
+    // --- Video: keep all but still images, rename, default on the first. --
+    // Cover art stored as a video track (e.g. ffmpeg's one-frame V_MJPEG) is
+    // dropped, so players never show it as a second video.
+    for (i, track) in of_type(TrackType::Video).filter(|t| !t.is_image()).enumerate() {
+        let tokens = video_tokens(analysis, track, labels, track_language(track, analysis).as_deref());
         let mut edit = base_edit(track);
         edit.name = name(&profile.video.name_format, &tokens);
         edit.flags = TrackFlags { default: i == 0, ..TrackFlags::default() };
@@ -252,15 +346,7 @@ fn apply_audio(
         .into_iter()
         .enumerate()
         .map(|(i, (track, language, role))| {
-            let attrs = audio_attrs(analysis.media.track(track.uid), &track.codec);
-            let mut tokens = Tokens::new();
-            tokens
-                .set("Language", language.as_deref().map(lang::display_name).unwrap_or_default())
-                .set("Format", LabelOverrides::apply(&labels.audio_format, &attrs.format))
-                .set("Channels", attrs.channels.clone().unwrap_or_default())
-                .set("Atmos", if attrs.atmos { "Atmos" } else { "" })
-                .set("Commentary", if role == AudioRole::Commentary { "Commentary" } else { "" })
-                .set("Description", if role == AudioRole::Description { "Audio Description" } else { "" });
+            let tokens = audio_tokens(analysis, track, labels, language.as_deref(), role);
             let mut edit = base_edit(track);
             edit.name = name(&audio_cfg.name_format, &tokens);
             edit.flags = TrackFlags {
@@ -282,6 +368,18 @@ struct SubtitlePatterns {
     cc: Option<Regex>,
     commentary: Option<Regex>,
     signs: Option<Regex>,
+}
+
+impl SubtitlePatterns {
+    fn new(cfg: &SubtitleProfile) -> Self {
+        Self {
+            forced: regex(&cfg.forced_pattern),
+            sdh: regex(&cfg.sdh_pattern),
+            cc: regex(&cfg.cc_pattern),
+            commentary: regex(&cfg.commentary_pattern),
+            signs: regex(&cfg.signs_pattern),
+        }
+    }
 }
 
 /// Classifies from flags first, then the track title. The element-count
@@ -330,13 +428,7 @@ fn apply_subtitles(
     original: Option<&str>,
     warnings: &mut Vec<String>,
 ) -> Vec<TrackEdit> {
-    let patterns = SubtitlePatterns {
-        forced: regex(&cfg.forced_pattern),
-        sdh: regex(&cfg.sdh_pattern),
-        cc: regex(&cfg.cc_pattern),
-        commentary: regex(&cfg.commentary_pattern),
-        signs: regex(&cfg.signs_pattern),
-    };
+    let patterns = SubtitlePatterns::new(cfg);
     let all_subs: Vec<&TrackInfo> = analysis
         .probe
         .tracks
@@ -388,11 +480,7 @@ fn apply_subtitles(
     let mut default_given = false;
     kept.into_iter()
         .map(|(track, language, kind)| {
-            let mut tokens = Tokens::new();
-            tokens
-                .set("Language", lang::display_name(&language))
-                .set("Kind", LabelOverrides::apply(&labels.subtitle_kind, kind.label()))
-                .set("Format", subtitle_format(analysis.media.track(track.uid), &track.codec));
+            let tokens = subtitle_tokens(analysis, track, labels, Some(&language), kind);
             let foreign = original.is_some_and(|o| o != language);
             let default = kind == SubtitleKind::Forced && cfg.default_forced_when_foreign && foreign && !default_given;
             default_given |= default;
@@ -492,7 +580,7 @@ mod tests {
         fn analysis(&self) -> FileAnalysis {
             FileAnalysis {
                 file_name: "x.mkv".into(),
-                probe: ProbeResult { container: ContainerInfo::default(), tracks: self.tracks.clone() },
+                probe: ProbeResult { container: ContainerInfo::default(), tracks: self.tracks.clone(), attachments: vec![] },
                 media: MediaAnalysis { tracks: self.media.clone(), ..Default::default() },
                 sections: vec![],
             }
@@ -673,5 +761,88 @@ mod tests {
         let o = apply_profile(&f.analysis(), &config.profiles[0], &config.labels, Some("en"));
         assert_eq!(kept_names(&o, TrackType::Audio), ["English EAC3 5.1 Atmos"]);
         assert_eq!(kept_names(&o, TrackType::Video), ["2160p DoVi P8 HEVC"]);
+    }
+
+    #[test]
+    fn cover_art_tracks_are_dropped_and_never_default() {
+        let mut f = Fixture { tracks: vec![], media: vec![] };
+        // Cover art first, as some muxers write it, then the real video.
+        f.push(TrackType::Video, "V_MJPEG", "und", None, TrackFlags { default: true, ..Default::default() }, MediaTrack {
+            format: Some("JPEG".into()),
+            ..Default::default()
+        });
+        f.video().audio("eng", "AAC", "", "", 2);
+        let o = run(&f, Some("en"));
+        assert_eq!(kept_names(&o, TrackType::Video), ["2160p DV8 HDR10 HEVC"]);
+        assert_eq!(kept_default(&o, TrackType::Video), [true]);
+        let cover = o.tracks.iter().find(|t| t.edit.uid == 1000).unwrap();
+        assert!(!cover.keep, "cover art is proposed for removal");
+    }
+
+    /// Re-renders every kept track's name from its proposed state.
+    fn rerendered(f: &Fixture, o: &ProfileOutcome) -> Vec<Option<String>> {
+        let config = AppConfig::default();
+        o.kept().map(|e| track_name(&f.analysis(), &config.profiles[0], &config.labels, e)).collect()
+    }
+
+    #[test]
+    fn track_name_reproduces_the_proposed_names() {
+        let mut f = multilingual();
+        f.sub("eng", Some("English SDH"), TrackFlags::default(), 1500)
+            .sub("eng", None, TrackFlags::default(), 1450)
+            .sub("eng", Some("Signs & Songs"), TrackFlags::default(), 40)
+            .sub("eng", None, TrackFlags::default(), 30)
+            .sub("eng", Some("Closed Captions"), TrackFlags::default(), 1500)
+            .sub("eng", Some("Commentary"), TrackFlags::default(), 900);
+        for original in [Some("en"), Some("ta"), None] {
+            let o = run(&f, original);
+            let proposed: Vec<Option<String>> = o.kept().map(|e| e.name.clone()).collect();
+            assert_eq!(rerendered(&f, &o), proposed, "original language {original:?}");
+        }
+    }
+
+    #[test]
+    fn track_name_follows_edited_flags() {
+        let mut f = Fixture::new();
+        f.audio("eng", "AAC", "", "", 2)
+            .sub("eng", None, TrackFlags::default(), 1000)
+            .sub("eng", Some("Closed Captions"), TrackFlags::default(), 1000);
+        let config = AppConfig::default();
+        let (profile, labels) = (&config.profiles[0], &config.labels);
+        let o = run(&f, Some("en"));
+        let analysis = f.analysis();
+        let edit = |uid: u64| o.kept().find(|e| e.uid == uid).unwrap().clone();
+        let with = |mut e: TrackEdit, flags: TrackFlags| {
+            e.flags = flags;
+            track_name(&analysis, profile, labels, &e).unwrap()
+        };
+
+        let sub = edit(1002);
+        assert_eq!(sub.name.as_deref(), Some("English"));
+        assert_eq!(with(sub.clone(), TrackFlags { hearing_impaired: true, ..Default::default() }), "English SDH");
+        assert_eq!(with(sub.clone(), TrackFlags { forced: true, ..Default::default() }), "English Forced");
+        assert_eq!(with(sub.clone(), TrackFlags { commentary: true, ..Default::default() }), "English Commentary");
+        assert_eq!(with(sub.clone(), TrackFlags::default()), "English");
+
+        // The title still tells CC apart from SDH.
+        let cc = edit(1003);
+        assert_eq!(cc.name.as_deref(), Some("English CC"));
+        assert_eq!(with(cc.clone(), TrackFlags::default()), "English");
+        assert_eq!(with(cc, TrackFlags { hearing_impaired: true, ..Default::default() }), "English CC");
+
+        let audio = edit(1001);
+        assert_eq!(with(audio.clone(), TrackFlags { commentary: true, ..Default::default() }), "English AAC 2.0 Commentary");
+        assert_eq!(with(audio, TrackFlags { visual_impaired: true, ..Default::default() }), "English AAC 2.0 Audio Description");
+    }
+
+    #[test]
+    fn track_name_follows_edited_language() {
+        let mut f = Fixture::new();
+        f.audio("eng", "AAC", "", "", 2).sub("eng", None, TrackFlags::default(), 1000);
+        let config = AppConfig::default();
+        let o = run(&f, Some("en"));
+        let mut sub = o.kept().find(|e| e.uid == 1002).unwrap().clone();
+        sub.language = Some("fr".into());
+        assert_eq!(track_name(&f.analysis(), &config.profiles[0], &config.labels, &sub).as_deref(), Some("French"));
     }
 }

@@ -11,7 +11,7 @@
 //! these callbacks without any further thread marshaling.
 
 use mkv_profiles::AppConfig;
-use mkv_types::{DirListing, FileAnalysis, JobId, JobOutcome, JobProgress, RootInfo, TrackEdit};
+use mkv_types::{AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobProgress, RootInfo, TrackEdit};
 
 /// Where a source or output file lives, as produced by one platform's own
 /// dialogs/browser and fed back into that same platform's `analyze` /
@@ -106,6 +106,7 @@ pub trait Backend: Send + Sync + 'static {
         output: SourceRef,
         kept_track_order: Vec<u64>,
         edits: Vec<TrackEdit>,
+        remove_attachments: Vec<AttachmentInfo>,
         cb: UiCallback<JobId>,
     );
 

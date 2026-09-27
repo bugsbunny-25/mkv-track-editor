@@ -27,7 +27,13 @@ fallback, HDR10+, HLG, Atmos, DTS:X, channel layouts, subtitle event counts).
 - **Tracks** — keep/drop (dropped tracks stay visible, dimmed), reorder within
   a type, rename, language, and flag toggles: **D**efault, **F**orced,
   **O**riginal language, **HI** (hearing impaired), **AD** (audio
-  description), **C**ommentary.
+  description), **C**ommentary. A name the profile generated follows the
+  flags and language (turning on HI renames "English" to "English SDH"); a
+  name you typed is left alone.
+- **Cover art** — images are never kept: cover art stored as a video track
+  (e.g. ffmpeg's one-frame MJPEG) is proposed for removal, and image
+  attachments (`cover.jpg`, …) are dropped on save. Font attachments, which
+  styled subtitles need, are kept.
 - **Media Info** — MediaInfo's full report by section, with a filter that
   searches every section.
 - **Naming** — title/year/TMDb ID/edition/source/group/season/episode,
@@ -117,7 +123,9 @@ docker/
   Dockerfile (Alpine, multi-arch), docker-compose.yml
 packaging/
   package-desktop.sh           release archives (macOS .app bundle, Linux binary)
-  homebrew/render-formula.sh   the Homebrew tap formula, rendered by CI
+  homebrew/render-cask.sh      the Homebrew tap cask (macOS), rendered by CI
+  homebrew/render-formula.sh   the Homebrew tap formula (Linux), rendered by CI
+  icon/                        the macOS app icon (SVG sources + rendered PNGs)
 .github/workflows/ci.yml       tests, builds, images, releases
 ```
 
@@ -191,18 +199,38 @@ frames that can't follow the design.
 
 ## Desktop app
 
-### Install with Homebrew (macOS Apple silicon, Linux x86_64/arm64)
+### Install with Homebrew
+
+macOS (Apple silicon):
+
+```bash
+brew install --cask bugsbunny-25/tap/mkv-track-editor
+```
+
+Linux (x86_64, arm64):
 
 ```bash
 brew install bugsbunny-25/tap/mkv-track-editor
 ```
 
-This also installs MKVToolNix and MediaInfo. Run `mkv-track-editor` from a
-terminal; on macOS the formula also installs `MKV Track Editor.app` (see
-`brew info mkv-track-editor` to add it to `/Applications`). On Linux the
-app uses Homebrew's X11/Wayland/Mesa libraries, which come with
-MKVToolNix anyway, and file dialogs go through the desktop's
+Both also install MKVToolNix and MediaInfo, and put `mkv-track-editor` on
+your `PATH`. On macOS the cask installs `MKV Track Editor.app` into
+`/Applications`, and `brew upgrade` / `brew uninstall --cask` keep it
+there or remove it. The app isn't notarized by Apple, so macOS blocks its
+first launch after each install or upgrade: open it once, then choose
+**Open Anyway** in System Settings → Privacy & Security.
+
+On Linux the app uses Homebrew's X11/Wayland/Mesa libraries, which come
+with MKVToolNix anyway, and file dialogs go through the desktop's
 xdg-desktop-portal.
+
+Upgrading from 0.1.0 on macOS, which installed a formula and asked you to
+link the app into `/Applications` by hand: remove the link and the
+formula, then install the cask.
+
+```bash
+rm "/Applications/MKV Track Editor.app" && brew uninstall mkv-track-editor
+```
 
 ### From source
 
@@ -334,15 +362,18 @@ templates (including the missing-TMDb-ID case).
 | Desktop build: macOS arm64, Linux x86_64, Linux arm64 | ✓ | ✓ | ✓ |
 | Desktop archives kept as workflow artifacts | | ✓ | ✓ |
 | Alpine image for amd64 + arm64 pushed to GHCR | | `:main`, `:sha-…` | `:X.Y.Z`, plus `:X.Y` / `:latest` if it's the newest |
-| GitHub release + formula in the Homebrew tap, then install-tested with `brew` on macOS and Linux | | | ✓ |
+| `vX.Y.Z` tag and GitHub release in this repository, with the desktop archives | | | ✓ |
+| GitHub release + cask (macOS) and formula (Linux) in the Homebrew tap, then install-tested with `brew` on macOS and Linux | | | ✓ |
 
 **Cutting a release:** bump `version` in the root `Cargo.toml` to `X.Y.Z`
 on `main`, then push a `release/X.Y.Z` branch. The run fails early if the
 branch name and `Cargo.toml` disagree. Pushing fixes to the same branch
-republishes `X.Y.Z` (the image tags, release archives and formula checksums
-are replaced). A fix pushed to an older release branch (say `release/0.1.4`
-after `release/0.2.0` exists) publishes `:0.1.4` and its archives, but leaves
-`:latest`, `:0.1` (if `0.1.5` exists) and the Homebrew formula alone.
+republishes `X.Y.Z` (the `vX.Y.Z` tag moves to the new commit; the image
+tags, release archives and cask/formula checksums are replaced). A fix
+pushed to an older release branch (say `release/0.1.4` after
+`release/0.2.0` exists) publishes `:0.1.4`, its release and archives, but
+leaves `:latest`, `:0.1` (if `0.1.5` exists), the "latest" release and the
+Homebrew cask and formula alone.
 
 Linux desktop binaries are built on Ubuntu 22.04, so they need glibc 2.35+,
 the same minimum as Homebrew on Linux. Each architecture's image is built on
@@ -352,10 +383,10 @@ a native runner, and the two are then merged into one multi-arch tag.
 
 - The public tap repository
   [`bugsbunny-25/homebrew-tap`](https://github.com/bugsbunny-25/homebrew-tap)
-  hosts the formula *and* the release archives, since Homebrew can't
-  download from this private repository.
+  hosts the cask, the formula *and* the release archives, since Homebrew
+  can't download from this private repository.
 - Repository secret `HOMEBREW_TAP_TOKEN`: a fine-grained personal access
   token limited to `bugsbunny-25/homebrew-tap` with **Contents: Read and
   write**.
-- Images are pushed with the workflow's own `GITHUB_TOKEN`; nothing else is
-  needed.
+- Images, the `vX.Y.Z` tag and this repository's release use the
+  workflow's own `GITHUB_TOKEN`; nothing else is needed.

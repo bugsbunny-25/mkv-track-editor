@@ -11,7 +11,7 @@ mod volume;
 pub use job::{JobId, JobOutcome, JobPhase, JobProgress};
 pub use media::{FileAnalysis, InfoRow, InfoSection, MediaAnalysis, MediaGeneral, MediaTrack};
 pub use plan::{RemuxPlan, TrackEdit};
-pub use track::{ContainerInfo, ProbeResult, TrackFlags, TrackInfo, TrackType};
+pub use track::{is_image_codec, AttachmentInfo, ContainerInfo, ProbeResult, TrackFlags, TrackInfo, TrackType};
 pub use volume::{DirEntry, DirListing, RootInfo};
 
 use serde::{Deserialize, Serialize};

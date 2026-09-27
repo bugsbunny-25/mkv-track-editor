@@ -88,6 +88,7 @@ pub async fn execute_plan(
     on_progress: Box<dyn Fn(JobProgress) + Send + Sync + 'static>,
 ) -> Result<JobOutcome, CoreError> {
     self::plan::validate(plan)?;
+    self::plan::validate_attachments(original, plan)?;
 
     on_progress(JobProgress {
         phase: JobPhase::Running,
@@ -163,7 +164,7 @@ mod tests {
             language: None,
             flags: TrackFlags::default(),
         };
-        let original = ProbeResult { container: ContainerInfo::default(), tracks: vec![track(0), track(1)] };
+        let original = ProbeResult { container: ContainerInfo::default(), tracks: vec![track(0), track(1)], attachments: vec![] };
         let runner = MockProcessRunner::default();
 
         // Reorder (needs remux) onto the same path → refused, nothing run.
@@ -172,6 +173,7 @@ mod tests {
             output_path: "/lib/a.mkv".into(),
             kept_track_order: vec![1, 0],
             edits: vec![edit(1), edit(0)],
+            remove_attachments: vec![],
         };
         let err = execute_plan(&runner, &original, &plan, Box::new(|_| {})).await.unwrap_err();
         assert!(err.to_string().contains("new output file"), "{err}");

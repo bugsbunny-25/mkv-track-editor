@@ -5,7 +5,9 @@
 
 use mkv_core::{analyze, config_store, execute_plan, probe, TokioProcessRunner, ToolPaths};
 use mkv_profiles::AppConfig;
-use mkv_types::{DirListing, FileAnalysis, JobId, JobOutcome, JobProgress, ProbeResult, RemuxPlan, RootInfo, TrackEdit};
+use mkv_types::{
+    AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobProgress, ProbeResult, RemuxPlan, RootInfo, TrackEdit,
+};
 use mkv_ui::{Backend, BackendCapabilities, ProgressCallback, SourceRef, UiCallback, UiError};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -128,6 +130,7 @@ impl Backend for DesktopBackend {
         output: SourceRef,
         kept_track_order: Vec<u64>,
         edits: Vec<TrackEdit>,
+        remove_attachments: Vec<AttachmentInfo>,
         cb: UiCallback<JobId>,
     ) {
         let (source_path, output_path) = match (local(source), local(output)) {
@@ -139,6 +142,7 @@ impl Backend for DesktopBackend {
             output_path,
             kept_track_order,
             edits,
+            remove_attachments,
         };
         if let Err(e) = mkv_core::plan::validate(&plan) {
             return cb(Err(UiError::new(e.to_string())));

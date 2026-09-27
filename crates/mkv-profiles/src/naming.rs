@@ -7,7 +7,7 @@ use crate::labels::{audio_attrs, video_attrs, AudioAttrs, VideoAttrs};
 use crate::lang;
 use crate::release::{parse_release_name, MediaKind, QualitySource, Revision};
 use crate::template::{render, RenderMode, Rendered, TemplateError, Tokens};
-use mkv_types::{FileAnalysis, TrackEdit, TrackType};
+use mkv_types::{is_image_codec, FileAnalysis, TrackEdit, TrackType};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -131,6 +131,11 @@ pub fn summarize(analysis: &FileAnalysis, kept: &[TrackEdit]) -> MediaSummary {
             .unwrap_or_default()
     };
     let first = |t: TrackType| kept.iter().find(|e| e.track_type == t);
+    // A kept cover-art track never describes the video.
+    let first_video = kept
+        .iter()
+        .find(|e| e.track_type == TrackType::Video && !is_image_codec(&codec_of(e.uid)))
+        .or_else(|| first(TrackType::Video));
     let languages = |t: TrackType| {
         let mut out: Vec<String> = Vec::new();
         for edit in kept.iter().filter(|e| e.track_type == t) {
@@ -144,7 +149,7 @@ pub fn summarize(analysis: &FileAnalysis, kept: &[TrackEdit]) -> MediaSummary {
         out
     };
     MediaSummary {
-        video: first(TrackType::Video).map(|e| video_attrs(analysis.media.track(e.uid), &codec_of(e.uid))),
+        video: first_video.map(|e| video_attrs(analysis.media.track(e.uid), &codec_of(e.uid))),
         audio: first(TrackType::Audio).map(|e| audio_attrs(analysis.media.track(e.uid), &codec_of(e.uid))),
         audio_languages: languages(TrackType::Audio),
         subtitle_languages: languages(TrackType::Subtitles),

@@ -3,9 +3,10 @@ use crate::process::{ProcessOutput, ProcessRunner};
 use mkv_types::RemuxPlan;
 
 /// Builds one `mkvpropedit` invocation targeting `target_path`, with a
-/// repeated `--edit track:=<uid> -s ...` block per track. Track UID (not
-/// mkvmerge's positional track id) is used because it's stable regardless of
-/// track order.
+/// repeated `--edit track:=<uid> -s ...` block per track and a
+/// `--delete-attachment =<uid>` per removed attachment. UIDs (not mkvmerge's
+/// positional ids) are used because they're stable regardless of order, and
+/// don't shift as earlier attachments are deleted.
 pub fn build_args(target_path: &str, plan: &RemuxPlan) -> Vec<String> {
     let mut args = vec![target_path.to_string()];
 
@@ -34,6 +35,11 @@ pub fn build_args(target_path: &str, plan: &RemuxPlan) -> Vec<String> {
             args.push("-s".to_string());
             args.push(format!("{property}={}", u8::from(value)));
         }
+    }
+
+    for attachment in &plan.remove_attachments {
+        args.push("--delete-attachment".to_string());
+        args.push(format!("={}", attachment.uid));
     }
 
     args
@@ -83,6 +89,7 @@ mod tests {
                     },
                 },
             ],
+            remove_attachments: vec![],
         };
 
         let args = build_args("/out.mkv", &plan);
@@ -106,6 +113,25 @@ mod tests {
         assert!(block_b.windows(2).any(|w| w == ["-s", "flag-visual-impaired=0"]));
     }
 
+    #[test]
+    fn deletes_attachments_by_uid() {
+        let plan = RemuxPlan {
+            source_path: "/in.mkv".into(),
+            output_path: "/out.mkv".into(),
+            kept_track_order: vec![],
+            edits: vec![],
+            remove_attachments: vec![mkv_types::AttachmentInfo {
+                id: 1,
+                uid: 17232074509077980272,
+                file_name: "cover.jpg".into(),
+                mime_type: "image/jpeg".into(),
+                size: 10,
+            }],
+        };
+        let args = build_args("/out.mkv", &plan);
+        assert_eq!(args, ["/out.mkv", "--delete-attachment", "=17232074509077980272"]);
+    }
+
     #[tokio::test]
     async fn run_skips_copy_when_output_equals_source() {
         use crate::process::MockProcessRunner;
@@ -122,6 +148,7 @@ mod tests {
                 language: None,
                 flags: TrackFlags::default(),
             }],
+            remove_attachments: vec![],
         };
         let runner = MockProcessRunner::default();
         // Would fail on fs::copy if the (skip-copy) branch weren't taken,
