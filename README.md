@@ -184,7 +184,7 @@ frames that can't follow the design.
   check for them at startup and fail fast with a clear message.
   - macOS: `brew install mkvtoolnix media-info`
   - Debian/Ubuntu: `apt install mkvtoolnix mediainfo`
-- For the web/Docker build: `rustup target add wasm32-unknown-unknown` and
+- For the web build without Docker: `rustup target add wasm32-unknown-unknown` and
   `cargo install wasm-pack --locked`.
 - **Docker** (with Compose) to build/run the container.
 - Linux desktop builds: `apt install pkg-config libfontconfig1-dev libxkbcommon-dev`.
@@ -259,6 +259,24 @@ to `docker/config/config.toml`. The container runs as an unprivileged user —
 if it can't write to `output/` or `config/`, uncomment `user: "UID:GID"` in
 `docker-compose.yml` with your own IDs. Build context is the repository root
 (`docker build -f docker/Dockerfile .`); Compose handles that.
+
+### With Apple `container` (macOS)
+
+Its BuildKit builder is a VM with 2 CPUs and 2 GB of RAM by default, less
+than rustc needs for the Slint UI crate (~2 GB on its own, next to the
+server build): the builder swaps nonstop (fans, heat) until rustc is
+killed. Give it more, and pass the size on every build — `container build`
+without `-c`/`-m` recreates the builder at the default size, and with them
+only sizes a builder it starts itself:
+
+```bash
+container builder stop; container builder delete   # only if one is running at another size
+container build -c 8 -m 8g -f docker/Dockerfile -t mkv-track-editor .
+```
+
+Build only your Mac's architecture: the builder has no Rosetta, so
+`--arch amd64` would compile everything under emulation. CI builds each
+architecture natively.
 
 ## Environment variables
 

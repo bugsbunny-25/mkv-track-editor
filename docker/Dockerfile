@@ -4,9 +4,12 @@
 # that reads HDR10+ from Matroska); Alpine 3.24 ships 26.01. The server is
 # built against musl in an Alpine stage so it runs on the Alpine runtime.
 #
-# Multi-arch: build with `--platform linux/amd64,linux/arm64`. The wasm
-# bundle is architecture-independent, so its stage always runs on the build
-# machine's own platform (no emulation) and is shared by every target.
+# Multi-arch: CI builds each platform natively on its own runner (amd64 on
+# x86_64, arm64 on arm64) and merges them into one manifest. Locally, build
+# only the machine's own platform (the default): any other platform compiles
+# the server under emulation (QEMU), many times slower and CPU-bound. The
+# wasm bundle is architecture-independent, so its stage always runs on the
+# build machine's own platform (no emulation) and is shared by every target.
 
 ARG ALPINE_VERSION=3.24
 
@@ -17,24 +20,36 @@ ARG ALPINE_VERSION=3.24
 #####################################################################
 FROM --platform=$BUILDPLATFORM rust:1-alpine${ALPINE_VERSION} AS wasm-builder
 
-RUN apk add --no-cache musl-dev binaryen \
-    && rustup target add wasm32-unknown-unknown \
-    && cargo install wasm-pack --locked
+RUN apk add --no-cache musl-dev binaryen curl \
+    && rustup target add wasm32-unknown-unknown
 
-# wasm-pack's own downloads of wasm-bindgen are glibc builds that can't run
-# on musl, so install the CLI matching the locked wasm-bindgen version;
-# wasm-pack picks it (and binaryen's wasm-opt) up from PATH.
+# The prebuilt musl wasm-bindgen CLI matching the locked wasm-bindgen
+# version, instead of compiling it (and wasm-pack) from source: those two
+# `cargo install`s were ~500 crates, rebuilt whenever the builder's cache
+# is gone. wasm-pack only ran cargo, wasm-bindgen and wasm-opt, so the
+# build below calls them directly.
 WORKDIR /workspace
 COPY Cargo.lock .
 RUN version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p') \
-    && cargo install wasm-bindgen-cli --locked --version "$version"
+    && name="wasm-bindgen-$version-$(uname -m)-unknown-linux-musl" \
+    && url="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$version/$name.tar.gz" \
+    && cd /tmp \
+    && curl -fsSLO "$url" \
+    && echo "$(curl -fsSL "$url.sha256sum" | cut -d' ' -f1)  $name.tar.gz" | sha256sum -c - \
+    && tar -xzf "$name.tar.gz" \
+    && install "$name/wasm-bindgen" /usr/local/bin/ \
+    && rm -rf /tmp/wasm-bindgen-*
 
 COPY . .
 
-WORKDIR /workspace/crates/mkv-web
+# Same steps and output (crates/mkv-web/pkg) as `wasm-pack build --release
+# --target web`.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/workspace/target,id=wasm-target \
-    wasm-pack build --release --target web
+    cargo build --release --locked --lib --target wasm32-unknown-unknown -p mkv-web \
+    && wasm-bindgen --target web --out-dir crates/mkv-web/pkg \
+        target/wasm32-unknown-unknown/release/mkv_web.wasm \
+    && wasm-opt -O crates/mkv-web/pkg/mkv_web_bg.wasm -o crates/mkv-web/pkg/mkv_web_bg.wasm
 
 #####################################################################
 # Stage 2: build the server binary for the target platform. mkv-server
