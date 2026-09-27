@@ -24,9 +24,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # No debug info in test/dev builds: rustc on the Slint-generated UI code
-  # otherwise needs more memory than private runners' 7 GB.
-  CARGO_PROFILE_DEV_DEBUG: "0"
   IMAGE: ghcr.io/bugsbunny-25/mkv-track-editor
   TAP_REPO: bugsbunny-25/homebrew-tap
   # How users tap it: `brew tap` drops the homebrew- prefix.
@@ -37,12 +34,17 @@ env:
 jobs:
   meta:
     name: Version
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       cargo-version: ${{ steps.version.outputs.cargo-version }}
       publish: ${{ steps.version.outputs.publish }}
       release: ${{ steps.version.outputs.release }}
+      # This release is the highest X.Y.Z overall / within its X.Y, so it
+      # moves :latest (and the Homebrew formula) / :X.Y. A fix pushed to an
+      # older release branch doesn't move them back.
+      latest: ${{ steps.version.outputs.latest }}
+      latest-minor: ${{ steps.version.outputs.latest-minor }}
     steps:
       - uses: actions/checkout@v7
       - id: version
@@ -51,6 +53,8 @@ jobs:
             | jq -r '.packages[] | select(.name == "mkv-desktop") | .version')
           publish=false
           release=false
+          latest=false
+          latest_minor=false
           version="$cargo_version"
           if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == release/* ]]; then
             branch_version=${GITHUB_REF_NAME#release/}
@@ -60,6 +64,12 @@ jobs:
             fi
             publish=true
             release=true
+            releases=$(git ls-remote --heads origin 'release/*' \
+              | sed -n 's#.*refs/heads/release/\([0-9]*\.[0-9]*\.[0-9]*\)$#\1#p')
+            highest() { sort -V | tail -n 1; }
+            [[ "$cargo_version" == "$(highest <<< "$releases")" ]] && latest=true
+            same_minor=$(awk -F. -v v="$cargo_version" 'BEGIN { split(v, c, ".") } $1 == c[1] && $2 == c[2]' <<< "$releases")
+            [[ "$cargo_version" == "$(highest <<< "$same_minor")" ]] && latest_minor=true
           elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == main ]]; then
             publish=true
             version="${cargo_version}-main.${GITHUB_SHA::7}"
@@ -69,12 +79,14 @@ jobs:
             echo "version=$version"
             echo "publish=$publish"
             echo "release=$release"
+            echo "latest=$latest"
+            echo "latest-minor=$latest_minor"
           } >> "$GITHUB_OUTPUT"
-          echo "Version $version (publish=$publish, release=$release)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Version $version (publish=$publish, release=$release, latest=$latest, latest-minor=$latest_minor)" >> "$GITHUB_STEP_SUMMARY"
 
   test:
     name: Tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       # mkvtoolnix, mediainfo and ffmpeg let mkv-core's real-binary
@@ -85,14 +97,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends $LINUX_BUILD_DEPS mkvtoolnix mediainfo ffmpeg
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # mkv-ui's lib and its unit-test build each need ~4.5 GB in rustc;
-      # building the libs first keeps them from compiling side by side.
-      - run: cargo build --workspace --locked
       - run: cargo test --workspace --locked
 
   web:
     name: Web build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -122,7 +131,7 @@ jobs:
           - platform: linux-arm64
             runner: ubuntu-22.04-arm
           - platform: macos-arm64
-            runner: macos-15
+            runner: macos-26
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -154,9 +163,9 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
           - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -199,7 +208,7 @@ jobs:
   docker-manifest:
     name: Image (multi-arch)
     needs: [meta, docker]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -224,8 +233,8 @@ jobs:
             type=raw,value=main,enable=${{ github.ref_name == 'main' }}
             type=sha,prefix=sha-,enable=${{ github.ref_name == 'main' }}
             type=semver,pattern={{version}},value=${{ needs.meta.outputs.cargo-version }},enable=${{ needs.meta.outputs.release == 'true' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.meta.outputs.cargo-version }},enable=${{ needs.meta.outputs.release == 'true' }}
-            type=raw,value=latest,enable=${{ needs.meta.outputs.release == 'true' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.meta.outputs.cargo-version }},enable=${{ needs.meta.outputs.latest-minor == 'true' }}
+            type=raw,value=latest,enable=${{ needs.meta.outputs.latest == 'true' }}
       - working-directory: ${{ runner.temp }}/digests
         run: |
           # shellcheck disable=SC2046 # the tag and digest lists are split on purpose
@@ -238,7 +247,7 @@ jobs:
     name: Homebrew release
     needs: [meta, test, web, desktop, docker-manifest]
     if: needs.meta.outputs.release == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       VERSION: ${{ needs.meta.outputs.version }}
       # Fine-grained token with Contents: read and write on the tap repo.
@@ -255,6 +264,7 @@ jobs:
           tag="mkv-track-editor-v$VERSION"
           if ! gh release view "$tag" --repo "$TAP_REPO" >/dev/null 2>&1; then
             gh release create "$tag" --repo "$TAP_REPO" \
+              --latest="${{ needs.meta.outputs.latest }}" \
               --title "MKV Track Editor $VERSION" \
               --notes "Desktop builds of MKV Track Editor $VERSION. Install with \`brew install $TAP/mkv-track-editor\`. Docker: \`$IMAGE:$VERSION\`."
           fi
@@ -267,12 +277,14 @@ jobs:
           SHA256_LINUX_X86_64=$(sha linux-x86_64) \
           SHA256_LINUX_ARM64=$(sha linux-arm64) \
             packaging/homebrew/render-formula.sh > "$RUNNER_TEMP/mkv-track-editor.rb"
-      - uses: actions/checkout@v7
+      - if: needs.meta.outputs.latest == 'true'
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.TAP_REPO }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
       - name: Commit formula to the tap
+        if: needs.meta.outputs.latest == 'true'
         working-directory: tap
         run: |
           mkdir -p Formula
@@ -290,10 +302,11 @@ jobs:
   homebrew-verify:
     name: Homebrew install (${{ matrix.runner }})
     needs: [meta, homebrew]
+    if: needs.meta.outputs.latest == 'true'
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+        runner: [macos-26, ubuntu-26.04, ubuntu-26.04-arm]
     runs-on: ${{ matrix.runner }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"

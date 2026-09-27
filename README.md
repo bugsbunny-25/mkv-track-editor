@@ -234,8 +234,14 @@ Open `http://localhost:8080`.
 ### Prebuilt image
 
 CI publishes a multi-arch (`linux/amd64`, `linux/arm64`) Alpine image to
-`ghcr.io/bugsbunny-25/mkv-track-editor`: `:main` and `:sha-<commit>` from
-`main`, `:X.Y.Z`, `:X.Y` and `:latest` from `release/X.Y.Z`. The package is
+`ghcr.io/bugsbunny-25/mkv-track-editor`:
+
+- `:main` — the latest build of `main` (plus `:sha-<commit>` per commit).
+- `:latest` — the newest release: the highest `release/X.Y.Z` branch.
+- `:X.Y.Z` per release, and `:X.Y` for the newest patch of that minor
+  version.
+
+The package is
 private like this repository, so `docker login ghcr.io` first. To use it with
 Compose, replace the `build:` block in `docker-compose.yml` with
 `image: ghcr.io/bugsbunny-25/mkv-track-editor:latest`.
@@ -309,14 +315,16 @@ templates (including the missing-TMDb-ID case).
 | Web build (wasm UI + server) | ✓ | ✓ | ✓ |
 | Desktop build: macOS arm64, Linux x86_64, Linux arm64 | ✓ | ✓ | ✓ |
 | Desktop archives kept as workflow artifacts | | ✓ | ✓ |
-| Alpine image for amd64 + arm64 pushed to GHCR | | `:main`, `:sha-…` | `:X.Y.Z`, `:X.Y`, `:latest` |
+| Alpine image for amd64 + arm64 pushed to GHCR | | `:main`, `:sha-…` | `:X.Y.Z`, plus `:X.Y` / `:latest` if it's the newest |
 | GitHub release + formula in the Homebrew tap, then install-tested with `brew` on macOS and Linux | | | ✓ |
 
 **Cutting a release:** bump `version` in the root `Cargo.toml` to `X.Y.Z`
 on `main`, then push a `release/X.Y.Z` branch. The run fails early if the
 branch name and `Cargo.toml` disagree. Pushing fixes to the same branch
 republishes `X.Y.Z` (the image tags, release archives and formula checksums
-are replaced).
+are replaced). A fix pushed to an older release branch (say `release/0.1.4`
+after `release/0.2.0` exists) publishes `:0.1.4` and its archives, but leaves
+`:latest`, `:0.1` (if `0.1.5` exists) and the Homebrew formula alone.
 
 Linux desktop binaries are built on Ubuntu 22.04, so they need glibc 2.35+,
 the same minimum as Homebrew on Linux. Each architecture's image is built on

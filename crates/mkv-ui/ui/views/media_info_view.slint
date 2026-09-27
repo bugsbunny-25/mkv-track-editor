@@ -26,8 +26,8 @@ component SectionList inherits Card {
             OverlineText { label: "Sections"; }
         }
         sections := ScrollView {
-            viewport-width: self.visible-width;
-            viewport-height: Bridge.info-sections.length * Theme.nav-item-height;
+            content-width: self.visible-width;
+            content-height: Bridge.info-sections.length * Theme.nav-item-height;
 
             // One highlight for the whole list, gliding to the selected
             // row; it steps aside while a filter searches every section.
@@ -64,7 +64,7 @@ component InfoTable inherits Card {
     property <int> section: Bridge.info-section-index;
     changed section => {
         root.settled = false;
-        rows.viewport-y = 0;
+        rows.content-y = 0;
         settle.running = true;
     }
 
@@ -115,6 +115,7 @@ component InfoTable inherits Card {
                     VerticalLayout {
                         // Key and value side by side…
                         if !root.stacked: HorizontalLayout {
+                            property <length> key-width: Viewport.lg ? 240px : 180px;
                             padding-left: Theme.space-4;
                             padding-right: Theme.space-4;
                             padding-top: Theme.space-2;
@@ -122,11 +123,19 @@ component InfoTable inherits Card {
                             spacing: Theme.space-4;
                             SecondaryText {
                                 text: row.key;
-                                width: Viewport.lg ? 240px : 180px;
+                                width: parent.key-width;
                                 wrap: word-wrap;
                                 vertical-alignment: top;
                             }
-                            BodyText { text: row.value; horizontal-stretch: 1; wrap: word-wrap; vertical-alignment: top; }
+                            // Explicit width (as when stacked) so wrapped lines
+                            // count toward the row height, and a long unbroken
+                            // value wraps instead of widening the row.
+                            BodyText {
+                                text: row.value;
+                                width: rows.visible-width - 2 * Theme.space-4 - parent.key-width - Theme.space-4;
+                                wrap: word-wrap;
+                                vertical-alignment: top;
+                            }
                         }
                         // …or the key above its value on narrow screens.
                         if root.stacked: VerticalLayout {

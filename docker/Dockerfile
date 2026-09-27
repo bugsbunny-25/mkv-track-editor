@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 #
 # Alpine throughout. The runtime needs MediaInfo >= 23.04 (first release
-# that reads HDR10+ from Matroska); Alpine 3.23 ships 25.09. The server is
+# that reads HDR10+ from Matroska); Alpine 3.24 ships 26.01. The server is
 # built against musl in an Alpine stage so it runs on the Alpine runtime.
 #
 # Multi-arch: build with `--platform linux/amd64,linux/arm64`. The wasm
 # bundle is architecture-independent, so its stage always runs on the build
 # machine's own platform (no emulation) and is shared by every target.
 
-ARG ALPINE_VERSION=3.23
+ARG ALPINE_VERSION=3.24
 
 #####################################################################
 # Stage 1: build the Slint UI compiled to wasm (mkv-web), served as

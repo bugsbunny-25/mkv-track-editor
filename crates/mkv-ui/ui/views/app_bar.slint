@@ -166,11 +166,11 @@ export component AppBar inherits Rectangle {
         tab-strip := Flickable {
             horizontal-stretch: 1;
             min-width: 0;
-            viewport-width: max(self.width, tab-row.preferred-width);
-            viewport-height: self.height;
+            content-width: max(self.width, tab-row.preferred-width);
+            content-height: self.height;
 
             tab-row := HorizontalLayout {
-                width: tab-strip.viewport-width;
+                width: tab-strip.content-width;
                 height: tab-strip.height;
                 alignment: start;
                 spacing: Theme.space-1-5;

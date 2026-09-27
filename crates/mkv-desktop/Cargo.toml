@@ -19,6 +19,16 @@ tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 # `unstable-winit-030` exposes winit window events (OS file drag and drop).
-# Unstable Slint APIs may change between minor releases, hence the ~1.17 pin.
-slint = { version = "~1.17", features = ["unstable-winit-030"] }
-rfd = "0.15"
+# Unstable Slint APIs may change between minor releases, hence the ~1.18 pin.
+# Slint's defaults minus the system tray, which this app doesn't use. The
+# software renderer stays as the fallback where OpenGL isn't available.
+slint = { version = "~1.18", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-software",
+    "accessibility",
+    "unstable-winit-030",
+] }
+rfd = "0.17"

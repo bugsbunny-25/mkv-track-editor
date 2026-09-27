@@ -255,7 +255,7 @@ export component SettingsView inherits VerticalLayout {
 
     if !Viewport.lg: page := ScrollView {
         vertical-stretch: 1;
-        viewport-height: column.height;
+        content-height: column.height;
         column := VerticalLayout {
             y: 0;
             width: page.visible-width;

@@ -38,8 +38,10 @@ class MkvTrackEditor < Formula
   end
 
   on_linux do
-    # Linked: fontconfig. Loaded at runtime by the windowing/GL stack:
-    # X11/XCB, xkbcommon, Wayland and EGL/GL (Mesa).
+    # Linked: fontconfig. Loaded at runtime: D-Bus (the file dialogs talk
+    # to xdg-desktop-portal through it) and the windowing/GL stack: X11/XCB,
+    # xkbcommon, Wayland and EGL/GL (Mesa).
+    depends_on "dbus"
     depends_on "fontconfig"
     depends_on "libx11"
     depends_on "libxcb"

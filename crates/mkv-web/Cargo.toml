@@ -11,12 +11,14 @@ crate-type = ["cdylib"]
 mkv-types.workspace = true
 mkv-ui.workspace = true
 mkv-profiles.workspace = true
-slint = "1"
+# winit on a canvas with the WebGL (femtovg) renderer; Slint's other default
+# features (accessibility, software renderer, system tray) do nothing here.
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-gloo-net = "0.6"
+gloo-net = "0.7"
 console_error_panic_hook = "0.1"
 getrandom = { workspace = true, features = ["wasm_js"] }
 

@@ -42,7 +42,7 @@ export component VolumeBrowser inherits VerticalLayout {
         vertical-stretch: 0;
         min-width: 0;
         height: Theme.touch-target;
-        viewport-width: max(self.width, roots-row.preferred-width);
+        content-width: max(self.width, roots-row.preferred-width);
         roots-row := HorizontalLayout {
             spacing: Theme.space-2;
             alignment: start;
