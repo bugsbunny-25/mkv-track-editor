@@ -1,46 +1,90 @@
 import { Theme } from "../theme/theme.slint";
 
-// Mutually exclusive view switcher (page tabs within a document).
+// Mutually exclusive view switcher (page tabs within a document): an
+// ink-outlined pill whose active segment fills with the accent. Each
+// segment's hit area is the full control height (a touch target); the
+// visible pill is inset inside it. Focusable: ←/→ switch segments.
 export component SegmentedControl inherits Rectangle {
     in property <[string]> items;
     in property <int> current-index;
+    // Stretch to the available width with equal segments (narrow screens).
+    in property <bool> fill;
     callback selected(int);
 
-    height: Theme.control-height;
-    horizontal-stretch: 0;
-    border-radius: Theme.radius-md;
+    property <length> inset: 4px;
+
+    height: Theme.touch-target;
+    horizontal-stretch: fill ? 1 : 0;
+    border-radius: self.height / 2;
+    border-width: Theme.border-width;
+    border-color: Theme.ink;
     background: Theme.surface-muted;
+    forward-focus: focus;
     accessible-role: tab-list;
 
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow && root.current-index > 0) {
+                root.selected(root.current-index - 1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow && root.current-index < root.items.length - 1) {
+                root.selected(root.current-index + 1);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    Rectangle {
+        x: -4px;
+        y: -4px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        border-radius: self.height / 2;
+        border-width: focus.has-focus ? 2px : 0;
+        border-color: Theme.focus-ring;
+    }
+
     HorizontalLayout {
-        padding: 3px;
+        padding-left: root.inset;
+        padding-right: root.inset;
         spacing: Theme.space-0-5;
 
         for item[i] in root.items: segment := Rectangle {
             property <bool> active: i == root.current-index;
-            border-radius: Theme.radius-sm;
-            background: active ? Theme.surface : (touch.has-hover ? Theme.state-hover : transparent);
-            drop-shadow-blur: active ? 3px : 0;
-            drop-shadow-offset-y: 1px;
-            drop-shadow-color: Theme.shadow;
+            min-width: Theme.touch-target;
+            horizontal-stretch: root.fill ? 1 : 0;
             accessible-role: tab;
             accessible-label: item;
             accessible-item-selected: active;
             accessible-action-default => { root.selected(i); }
-            animate background { duration: Theme.duration-fast; }
+
+            // Visible pill, inset so the outline shows around it.
+            Rectangle {
+                y: root.inset;
+                height: parent.height - 2 * root.inset;
+                border-radius: self.height / 2;
+                background: segment.active ? Theme.accent : (touch.has-hover ? Theme.state-hover : transparent);
+                animate background { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+            }
 
             touch := TouchArea {
                 mouse-cursor: pointer;
-                clicked => { root.selected(i); }
+                clicked => {
+                    focus.focus();
+                    root.selected(i);
+                }
             }
             HorizontalLayout {
-                padding-left: Theme.space-3;
-                padding-right: Theme.space-3;
+                padding-left: Theme.space-3 + Theme.space-0-5;
+                padding-right: Theme.space-3 + Theme.space-0-5;
+                alignment: center;
                 Text {
                     text: item;
                     font-size: Theme.font-body;
-                    font-weight: Theme.weight-medium;
-                    color: segment.active ? Theme.text-primary : Theme.text-secondary;
+                    font-weight: Theme.weight-bold;
+                    color: segment.active ? Theme.on-accent : (touch.has-hover ? Theme.text-primary : Theme.text-muted);
                     vertical-alignment: center;
                 }
             }

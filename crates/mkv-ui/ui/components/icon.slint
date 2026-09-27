@@ -10,31 +10,39 @@ export component Icon inherits Image {
     accessible-role: none;
 }
 
-// An icon on a tinted rounded square — used for track types, file posters
-// and list entries.
+// An icon enclosed in a solid, ink-outlined circle — icons never float
+// alone. Used for track types, file posters and list entries. Set `lively`
+// (e.g. from the parent's hover) to give it a little wiggle.
 export component IconTile inherits Rectangle {
     in property <image> icon;
     in property <Tone> tone: Tone.neutral;
     in property <length> size: Theme.tile-md;
-    in property <length> icon-size: size * 0.5;
+    in property <length> icon-size: size * 0.46;
+    in property <bool> lively;
 
     width: size;
     height: size;
-    border-radius: size <= Theme.tile-sm ? Theme.radius-sm : Theme.radius-md;
-    background: Theme.tone-background(tone);
+    border-radius: size / 2;
+    border-width: Theme.border-width;
+    border-color: Theme.ink;
+    background: Theme.tone-solid(tone);
 
     Icon {
         source: root.icon;
         size: root.icon-size;
-        colorize: Theme.tone-foreground(root.tone);
+        colorize: Theme.tone-on-solid(root.tone);
+        transform-rotation: root.lively ? -Theme.wiggle : 0deg;
+        animate transform-rotation { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
     }
 }
 
-// Small circular status indicator.
+// Small circular status indicator, outlined like a sticker.
 export component StatusDot inherits Rectangle {
     in property <Tone> tone: Tone.neutral;
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: self.width / 2;
+    border-width: 1.5px;
+    border-color: Theme.ink;
     background: Theme.tone-solid(tone);
 }

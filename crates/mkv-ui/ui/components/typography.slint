@@ -1,20 +1,23 @@
 // Type scale. Use these instead of styling `Text` ad hoc so sizes, weights
-// and colours stay consistent across views.
+// and colours stay consistent across views. Headings use the Outfit
+// display face; everything else inherits Plus Jakarta Sans from the window.
 
 import { Theme } from "../theme/theme.slint";
 
 // Page / document title.
 export component DisplayText inherits Text {
+    font-family: Theme.family-heading;
     font-size: Theme.font-display;
-    font-weight: Theme.weight-semibold;
+    font-weight: Theme.weight-extrabold;
     color: Theme.text-primary;
     overflow: elide;
 }
 
 // Card and section titles.
 export component TitleText inherits Text {
+    font-family: Theme.family-heading;
     font-size: Theme.font-title;
-    font-weight: Theme.weight-semibold;
+    font-weight: Theme.weight-extrabold;
     color: Theme.text-primary;
     overflow: elide;
 }
@@ -22,7 +25,7 @@ export component TitleText inherits Text {
 // Form labels and emphasised body copy.
 export component LabelText inherits Text {
     font-size: Theme.font-body;
-    font-weight: Theme.weight-medium;
+    font-weight: Theme.weight-bold;
     color: Theme.text-primary;
     vertical-alignment: center;
 }
@@ -46,11 +49,14 @@ export component CaptionText inherits Text {
     vertical-alignment: center;
 }
 
-// Small group heading above a list of controls.
+// Small group heading above a list of controls: bold, uppercase, tracked.
 export component OverlineText inherits Text {
+    in property <string> label;
+    text: label.to-uppercase();
     font-size: Theme.font-caption;
-    font-weight: Theme.weight-semibold;
+    font-weight: Theme.weight-bold;
     color: Theme.text-muted;
-    letter-spacing: 0.4px;
+    letter-spacing: Theme.tracking-overline;
     vertical-alignment: center;
+    accessible-label: label;
 }

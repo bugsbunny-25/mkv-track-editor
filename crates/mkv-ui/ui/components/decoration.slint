@@ -1,0 +1,70 @@
+// Background decoration: the dot grid and "confetti" shapes that make the
+// world around the content feel alive. Purely visual — never interactive,
+// never behind text that it could obscure.
+
+import { Theme } from "../theme/theme.slint";
+import { Patterns } from "../theme/icons.slint";
+
+// Dot grid filling its parent; place it first so content paints over it.
+export component DotGrid inherits Image {
+    width: 100%;
+    height: 100%;
+    source: Patterns.dots;
+    colorize: Theme.pattern;
+    horizontal-tiling: repeat;
+    vertical-tiling: repeat;
+    accessible-role: none;
+}
+
+export enum ConfettiShape {
+    circle,
+    triangle,
+    square,
+    ring,
+}
+
+// One ink-outlined confetti piece. Size it with `size`, colour it with
+// `color`, tilt it with `angle`.
+export component Confetti {
+    in property <ConfettiShape> shape: ConfettiShape.circle;
+    in property <color> color: Theme.yellow;
+    in property <length> size: 40px;
+    in property <angle> angle: 0deg;
+
+    width: size;
+    height: size;
+    accessible-role: none;
+
+    if root.shape == ConfettiShape.circle: Rectangle {
+        border-radius: self.width / 2;
+        border-width: Theme.border-width;
+        border-color: Theme.ink;
+        background: root.color;
+    }
+    if root.shape == ConfettiShape.square: Rectangle {
+        width: root.size * 0.78;
+        height: self.width;
+        border-radius: self.width * 0.2;
+        border-width: Theme.border-width;
+        border-color: Theme.ink;
+        background: root.color;
+        transform-rotation: root.angle;
+    }
+    if root.shape == ConfettiShape.triangle: Path {
+        width: root.size;
+        height: root.size;
+        viewbox-width: 30;
+        viewbox-height: 30;
+        commands: "M15 3 L28 27 L2 27 Z";
+        fill: root.color;
+        stroke: Theme.ink;
+        stroke-width: Theme.border-width;
+        transform-rotation: root.angle;
+    }
+    // Outline-only circle in the piece's colour.
+    if root.shape == ConfettiShape.ring: Rectangle {
+        border-radius: self.width / 2;
+        border-width: 3px;
+        border-color: root.color;
+    }
+}

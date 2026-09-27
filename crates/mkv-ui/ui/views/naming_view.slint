@@ -1,194 +1,202 @@
 // Editable identity of the file (prefilled from the release name) that
 // feeds the Radarr/Sonarr-style output name, with a live preview.
+//
+// Responsive: fields sit in pairs from `sm` up and stack below it. Slint's
+// grid cells can't move at runtime, so each field is a small component
+// placed either in `Pair` rows or stacked.
 
-import { ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import {
-    Theme, Tone, Icons, IconTile, Card, SectionCard, Banner, FormField, OverlineText, CaptionText,
+    Select, TextField, Theme, Tone, Viewport, Icons, IconTile, Card, SectionCard, Banner, FormField, OverlineText,
+    CaptionText,
 } from "../components/index.slint";
 import { Bridge } from "../bridge.slint";
 
+component TypeField inherits FormField {
+    label: "Type";
+    Select {
+        model: ["Movie", "Episode"];
+        current-index <=> Bridge.kind-index;
+        selected => { Bridge.naming-edited(); }
+    }
+}
+component SourceField inherits FormField {
+    label: "Source";
+    Select {
+        model: Bridge.source-names;
+        current-index <=> Bridge.source-index;
+        selected => { Bridge.naming-edited(); }
+    }
+}
+component TitleField inherits FormField {
+    label: Bridge.kind-index == 0 ? "Title" : "Series";
+    TextField { text <=> Bridge.meta-title; edited => { Bridge.naming-edited(); } }
+}
+component YearField inherits FormField {
+    label: "Year";
+    TextField { text <=> Bridge.meta-year; edited => { Bridge.naming-edited(); } }
+}
+component TmdbField inherits FormField {
+    label: "TMDb ID";
+    TextField { text <=> Bridge.meta-tmdb; placeholder-text: "603"; edited => { Bridge.naming-edited(); } }
+}
+component ImdbField inherits FormField {
+    label: "IMDb ID";
+    TextField { text <=> Bridge.meta-imdb; placeholder-text: "tt0133093"; edited => { Bridge.naming-edited(); } }
+}
+component EditionField inherits FormField {
+    label: "Edition";
+    TextField { text <=> Bridge.meta-edition; placeholder-text: "Director's Cut"; edited => { Bridge.naming-edited(); } }
+}
+component RevisionField inherits FormField {
+    label: "Revision";
+    Select {
+        model: Bridge.revision-names;
+        current-index <=> Bridge.revision-index;
+        selected => { Bridge.naming-edited(); }
+    }
+}
+component CustomFormatsField inherits FormField {
+    label: "Custom formats";
+    TextField {
+        text <=> Bridge.meta-custom-formats;
+        placeholder-text: "IMAX Enhanced";
+        edited => { Bridge.naming-edited(); }
+    }
+}
+component GroupField inherits FormField {
+    label: "Release group";
+    TextField { text <=> Bridge.meta-group; edited => { Bridge.naming-edited(); } }
+}
+component SeasonField inherits FormField {
+    label: "Season";
+    TextField { enabled: Bridge.kind-index == 1; text <=> Bridge.meta-season; edited => { Bridge.naming-edited(); } }
+}
+component EpisodesField inherits FormField {
+    label: "Episodes";
+    TextField {
+        enabled: Bridge.kind-index == 1;
+        text <=> Bridge.meta-episodes;
+        placeholder-text: "2 or 2-3";
+        edited => { Bridge.naming-edited(); }
+    }
+}
+component EpisodeTitleField inherits FormField {
+    label: "Episode title";
+    TextField {
+        enabled: Bridge.kind-index == 1;
+        text <=> Bridge.meta-episode-title;
+        edited => { Bridge.naming-edited(); }
+    }
+}
+component TvdbField inherits FormField {
+    label: "TVDB ID";
+    TextField { enabled: Bridge.kind-index == 1; text <=> Bridge.meta-tvdb; edited => { Bridge.naming-edited(); } }
+}
+
+// Vertical rhythm inside a card's field grid.
+component Fields inherits VerticalLayout {
+    spacing: Theme.space-3;
+}
+// A row of two fields (from `sm` up).
+component Pair inherits HorizontalLayout {
+    spacing: Theme.space-4;
+}
+
+// The cards, without scrolling — embedded directly when the whole document
+// scrolls, wrapped in `NamingView` otherwise.
+export component NamingForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    alignment: start;
+
+    Card {
+        VerticalLayout {
+            padding: Theme.space-4;
+            spacing: Theme.space-3;
+            HorizontalLayout {
+                spacing: Theme.space-3;
+                VerticalLayout {
+                    alignment: center;
+                    IconTile { icon: Icons.tag; tone: Tone.accent; }
+                }
+                VerticalLayout {
+                    spacing: Theme.space-1;
+                    horizontal-stretch: 1;
+                    min-width: 0;
+                    OverlineText { label: "Output file name"; }
+                    Text {
+                        text: Bridge.preview-name;
+                        wrap: word-wrap;
+                        font-size: Theme.font-title;
+                        font-weight: Theme.weight-medium;
+                        color: Theme.text-primary;
+                    }
+                }
+            }
+            if Bridge.preview-problem != "": Banner { text: Bridge.preview-problem; tone: Tone.danger; }
+        }
+    }
+
+    SectionCard {
+        title: "Title";
+        description: "Prefilled from the release name. IDs are optional.";
+        if Viewport.sm: Fields {
+            Pair { TypeField { } SourceField { } }
+            Pair { TitleField { } YearField { } }
+            Pair { TmdbField { } ImdbField { } }
+        }
+        if !Viewport.sm: Fields {
+            TypeField { }
+            SourceField { }
+            TitleField { }
+            YearField { }
+            TmdbField { }
+            ImdbField { }
+        }
+    }
+
+    SectionCard {
+        title: "Release";
+        if Viewport.sm: Fields {
+            Pair { EditionField { } RevisionField { } }
+            Pair { CustomFormatsField { } GroupField { } }
+        }
+        if !Viewport.sm: Fields {
+            EditionField { }
+            RevisionField { }
+            CustomFormatsField { }
+            GroupField { }
+        }
+    }
+
+    // Episode fields stay visible (disabled for movies) so the layout
+    // doesn't jump when switching type.
+    SectionCard {
+        title: "Episode";
+        description: Bridge.kind-index == 1 ? "" : "Switch the type to Episode to use these fields.";
+        if Viewport.sm: Fields {
+            Pair { SeasonField { } EpisodesField { } }
+            Pair { EpisodeTitleField { } TvdbField { } }
+        }
+        if !Viewport.sm: Fields {
+            SeasonField { }
+            EpisodesField { }
+            EpisodeTitleField { }
+            TvdbField { }
+        }
+    }
+
+    CaptionText {
+        text: "Formats are configured in Settings and follow Radarr/Sonarr token syntax. Audio and video tokens reflect the tracks you keep.";
+        wrap: word-wrap;
+    }
+}
+
 export component NamingView inherits ScrollView {
-    VerticalLayout {
+    NamingForm {
         width: root.visible-width;
         // Gutter so cards (and their shadows) clear the scrollbar.
-        padding-right: Theme.space-3;
-        padding-bottom: Theme.space-1;
-        spacing: Theme.space-4;
-        alignment: start;
-
-        Card {
-            VerticalLayout {
-                padding: Theme.space-4;
-                spacing: Theme.space-3;
-                HorizontalLayout {
-                    spacing: Theme.space-3;
-                    VerticalLayout {
-                        alignment: center;
-                        IconTile { icon: Icons.tag; tone: Tone.accent; }
-                    }
-                    VerticalLayout {
-                        spacing: Theme.space-1;
-                        horizontal-stretch: 1;
-                        OverlineText { text: "Output file name"; }
-                        Text {
-                            text: Bridge.preview-name;
-                            wrap: word-wrap;
-                            font-size: Theme.font-title;
-                            font-weight: Theme.weight-medium;
-                            color: Theme.text-primary;
-                        }
-                    }
-                }
-                if Bridge.preview-problem != "": Banner { text: Bridge.preview-problem; tone: Tone.danger; }
-            }
-        }
-
-        SectionCard {
-            title: "Title";
-            description: "Prefilled from the release name. IDs are optional.";
-            GridLayout {
-                spacing-horizontal: Theme.space-4;
-                spacing-vertical: Theme.space-3;
-                Row {
-                    FormField {
-                        label: "Type";
-                        ComboBox {
-                            model: ["Movie", "Episode"];
-                            current-index <=> Bridge.kind-index;
-                            selected => { Bridge.naming-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "Source";
-                        ComboBox {
-                            model: Bridge.source-names;
-                            current-index <=> Bridge.source-index;
-                            selected => { Bridge.naming-edited(); }
-                        }
-                    }
-                }
-                Row {
-                    FormField {
-                        label: Bridge.kind-index == 0 ? "Title" : "Series";
-                        LineEdit { text <=> Bridge.meta-title; edited => { Bridge.naming-edited(); } }
-                    }
-                    FormField {
-                        label: "Year";
-                        LineEdit { text <=> Bridge.meta-year; edited => { Bridge.naming-edited(); } }
-                    }
-                }
-                Row {
-                    FormField {
-                        label: "TMDb ID";
-                        LineEdit {
-                            text <=> Bridge.meta-tmdb;
-                            placeholder-text: "603";
-                            edited => { Bridge.naming-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "IMDb ID";
-                        LineEdit {
-                            text <=> Bridge.meta-imdb;
-                            placeholder-text: "tt0133093";
-                            edited => { Bridge.naming-edited(); }
-                        }
-                    }
-                }
-            }
-        }
-
-        SectionCard {
-            title: "Release";
-            GridLayout {
-                spacing-horizontal: Theme.space-4;
-                spacing-vertical: Theme.space-3;
-                Row {
-                    FormField {
-                        label: "Edition";
-                        LineEdit {
-                            text <=> Bridge.meta-edition;
-                            placeholder-text: "Director's Cut";
-                            edited => { Bridge.naming-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "Revision";
-                        ComboBox {
-                            model: Bridge.revision-names;
-                            current-index <=> Bridge.revision-index;
-                            selected => { Bridge.naming-edited(); }
-                        }
-                    }
-                }
-                Row {
-                    FormField {
-                        label: "Custom formats";
-                        LineEdit {
-                            text <=> Bridge.meta-custom-formats;
-                            placeholder-text: "IMAX Enhanced";
-                            edited => { Bridge.naming-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "Release group";
-                        LineEdit { text <=> Bridge.meta-group; edited => { Bridge.naming-edited(); } }
-                    }
-                }
-            }
-        }
-
-        // Episode fields stay visible (disabled for movies) so the layout
-        // doesn't jump when switching type.
-        SectionCard {
-            title: "Episode";
-            description: Bridge.kind-index == 1 ? "" : "Switch the type to Episode to use these fields.";
-            GridLayout {
-                spacing-horizontal: Theme.space-4;
-                spacing-vertical: Theme.space-3;
-                Row {
-                    FormField {
-                        label: "Season";
-                        LineEdit {
-                            enabled: Bridge.kind-index == 1;
-                            text <=> Bridge.meta-season;
-                            edited => { Bridge.naming-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "Episodes";
-                        LineEdit {
-                            enabled: Bridge.kind-index == 1;
-                            text <=> Bridge.meta-episodes;
-                            placeholder-text: "2 or 2-3";
-                            edited => { Bridge.naming-edited(); }
-                        }
-                    }
-                }
-                Row {
-                    FormField {
-                        label: "Episode title";
-                        LineEdit {
-                            enabled: Bridge.kind-index == 1;
-                            text <=> Bridge.meta-episode-title;
-                            edited => { Bridge.naming-edited(); }
-                        }
-                    }
-                    FormField {
-                        label: "TVDB ID";
-                        LineEdit {
-                            enabled: Bridge.kind-index == 1;
-                            text <=> Bridge.meta-tvdb;
-                            edited => { Bridge.naming-edited(); }
-                        }
-                    }
-                }
-            }
-        }
-
-        CaptionText {
-            text: "Formats are configured in Settings and follow Radarr/Sonarr token syntax. Audio and video tokens reflect the tracks you keep.";
-            wrap: word-wrap;
-        }
+        padding-right: Theme.space-3 + Theme.shadow-card-offset;
+        padding-bottom: Theme.shadow-card-offset;
     }
 }

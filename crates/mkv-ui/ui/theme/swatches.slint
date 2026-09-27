@@ -3,65 +3,79 @@
 // Nothing outside `ui/theme/` may reference `Swatches`: components and
 // views consume the semantic tokens in `Theme`, which map these primitives
 // per colour scheme. Changing a hue here restyles the whole app.
+//
+// Playful Geometric: warm paper, slate ink, and a punchy violet / pink /
+// yellow / mint "confetti" set. Night swatches are the dark-scheme
+// counterparts: plum-slate paper, cream ink, lighter pastels.
 
 export global Swatches {
-    // Neutral (cool grey), light → dark.
-    out property <color> neutral-0: #ffffff;
-    out property <color> neutral-25: #fafafb;
-    out property <color> neutral-50: #f5f5f7;
-    out property <color> neutral-100: #ededf0;
-    out property <color> neutral-150: #e3e3e8;
-    out property <color> neutral-200: #d4d4db;
-    out property <color> neutral-300: #b4b4be;
-    out property <color> neutral-400: #8b8b96;
-    out property <color> neutral-500: #6b6b76;
-    out property <color> neutral-600: #52525c;
-    out property <color> neutral-700: #3a3a42;
-    out property <color> neutral-800: #28282e;
-    out property <color> neutral-850: #1e1e23;
-    out property <color> neutral-900: #17171b;
-    out property <color> neutral-950: #0f0f12;
+    // Paper & ink (light scheme).
+    out property <color> paper: #FFFDF5;
+    out property <color> white: #FFFFFF;
+    out property <color> slate-50: #F8FAFC;
+    out property <color> slate-100: #F1F5F9;
+    out property <color> slate-200: #E2E8F0;
+    out property <color> slate-300: #CBD5E1;
+    out property <color> slate-400: #94A3B8;
+    out property <color> slate-500: #64748B;
+    out property <color> slate-600: #475569;
+    out property <color> slate-700: #334155;
+    out property <color> slate-800: #1E293B;
+
+    // Night paper & ink (dark scheme).
+    out property <color> night-shadow: #0B0812;
+    out property <color> night-950: #17131F;
+    out property <color> night-900: #221C2E;
+    out property <color> night-850: #2C2540;
+    out property <color> night-800: #3A3150;
+    out property <color> night-700: #4A4063;
+    out property <color> night-500: #6E6488;
+    out property <color> night-450: #8479A0;
+    out property <color> night-400: #A59DB8;
+    out property <color> night-200: #DAD4E6;
+    out property <color> cream: #F8F5EC;
 
     // Violet — brand / accent.
-    out property <color> violet-50: #f0efff;
-    out property <color> violet-100: #e1deff;
-    out property <color> violet-300: #aba3fa;
-    out property <color> violet-400: #8c82f5;
-    out property <color> violet-500: #6e62ec;
-    out property <color> violet-600: #5a4ed8;
-    out property <color> violet-700: #483db5;
-    out property <color> violet-800: #2e2870;
-    out property <color> violet-900: #221d52;
+    out property <color> violet-50: #F3EEFF;
+    out property <color> violet-100: #EDE9FE;
+    out property <color> violet-300: #C4B5FD;
+    out property <color> violet-400: #A78BFA;
+    out property <color> violet-500: #8B5CF6;
+    out property <color> violet-600: #7C3AED;
+    out property <color> violet-700: #6D28D9;
+    out property <color> violet-night: #2F2548;
 
-    // Status hues.
-    out property <color> green-50: #e8f7ef;
-    out property <color> green-400: #3dbe82;
-    out property <color> green-600: #16865a;
-    out property <color> green-800: #11402d;
+    // Confetti hues.
+    out property <color> pink-100: #FCE7F3;
+    out property <color> pink-300: #F9A8D4;
+    out property <color> pink-400: #F472B6;
+    out property <color> pink-700: #BE185D;
+    out property <color> pink-night: #43263A;
 
-    out property <color> amber-50: #fdf3e1;
-    out property <color> amber-400: #f0a63a;
-    out property <color> amber-600: #9c5f09;
-    out property <color> amber-800: #4a300a;
+    out property <color> yellow-100: #FEF3C7;
+    out property <color> yellow-300: #FCD34D;
+    out property <color> yellow-400: #FBBF24;
+    out property <color> yellow-500: #F59E0B;
+    out property <color> yellow-700: #B45309;
+    out property <color> yellow-night: #463A1E;
 
-    out property <color> red-50: #fdecec;
-    out property <color> red-400: #f07171;
-    out property <color> red-600: #c93838;
-    out property <color> red-800: #4d1a1a;
+    out property <color> mint-100: #D1FAE5;
+    out property <color> mint-300: #6EE7B7;
+    out property <color> mint-400: #34D399;
+    out property <color> mint-500: #10B981;
+    out property <color> mint-700: #047857;
+    out property <color> mint-night: #1D3B35;
 
-    // Track-type category hues.
-    out property <color> blue-50: #e8f1fd;
-    out property <color> blue-400: #6aa6f2;
-    out property <color> blue-600: #2466c2;
-    out property <color> blue-800: #15325c;
+    // Status & track-type hues.
+    out property <color> blue-100: #DBEAFE;
+    out property <color> blue-300: #93C5FD;
+    out property <color> blue-500: #3B82F6;
+    out property <color> blue-700: #1D4ED8;
+    out property <color> blue-night: #243452;
 
-    out property <color> teal-50: #e3f6f3;
-    out property <color> teal-400: #3cc0ae;
-    out property <color> teal-600: #0f7f72;
-    out property <color> teal-800: #0d3d37;
-
-    out property <color> orange-50: #fdeee6;
-    out property <color> orange-400: #f08a5d;
-    out property <color> orange-600: #b8501f;
-    out property <color> orange-800: #4a2210;
+    out property <color> red-100: #FEE2E2;
+    out property <color> red-300: #FCA5A5;
+    out property <color> red-500: #EF4444;
+    out property <color> red-700: #B91C1C;
+    out property <color> red-night: #47242B;
 }

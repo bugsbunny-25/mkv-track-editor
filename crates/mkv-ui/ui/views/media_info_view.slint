@@ -1,78 +1,145 @@
 // MediaInfo's full report: sections (General, Video, Audio #1, ...) on the
 // left, a filterable key/value table on the right. A filter searches every
 // section.
+//
+// Switching sections is smoothed: one highlight glides between the rows
+// and the table cross-fades (and scrolls back to the top).
+//
+// Responsive: sidebar + table from `md` up; below it the sections become a
+// picker above the table and each row stacks its key above its value.
 
-import { LineEdit, ListView } from "std-widgets.slint";
+import { ListView, ScrollView } from "std-widgets.slint";
 import {
-    Theme, Icons, Icon, Card, Divider, NavItem, OverlineText, SecondaryText, BodyText, CaptionText,
+    Select, TextField, Theme, Viewport, Icons, Icon, Card, Divider, NavItem, NavHighlight, OverlineText, SecondaryText, BodyText, CaptionText,
 } from "../components/index.slint";
 import { Bridge } from "../bridge.slint";
 
-export component MediaInfoView inherits HorizontalLayout {
-    spacing: Theme.space-4;
+// Sidebar list of sections with one gliding highlight (from `md` up).
+component SectionList inherits Card {
+    VerticalLayout {
+        padding: Theme.space-2;
+        spacing: Theme.space-1;
+        HorizontalLayout {
+            padding-left: Theme.space-2 + Theme.space-0-5;
+            padding-top: Theme.space-2;
+            padding-bottom: Theme.space-1;
+            OverlineText { label: "Sections"; }
+        }
+        sections := ScrollView {
+            viewport-width: self.visible-width;
+            viewport-height: Bridge.info-sections.length * Theme.nav-item-height;
 
-    Card {
-        width: Theme.sidebar-width;
-        VerticalLayout {
-            padding: Theme.space-2;
-            spacing: Theme.space-1;
-            HorizontalLayout {
-                padding-left: Theme.space-2 + Theme.space-0-5;
-                padding-top: Theme.space-2;
-                padding-bottom: Theme.space-1;
-                OverlineText { text: "Sections"; }
+            // One highlight for the whole list, gliding to the selected
+            // row; it steps aside while a filter searches every section.
+            NavHighlight {
+                y: Bridge.info-section-index * Theme.nav-item-height;
+                width: sections.visible-width;
+                height: Theme.nav-item-height;
+                opacity: Bridge.info-filter == "" ? 1 : 0;
+                animate y { duration: Theme.duration-glide; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+                animate opacity { duration: Theme.duration-medium; }
             }
-            ListView {
+            VerticalLayout {
+                width: sections.visible-width;
+                alignment: start;
                 for title[i] in Bridge.info-sections: NavItem {
                     text: title;
+                    external-highlight: true;
                     selected: i == Bridge.info-section-index && Bridge.info-filter == "";
                     clicked => { Bridge.info-section-selected(i); }
                 }
             }
         }
     }
+}
 
-    Card {
-        horizontal-stretch: 1;
-        VerticalLayout {
-            HorizontalLayout {
-                padding: Theme.space-3;
-                spacing: Theme.space-3;
-                VerticalLayout {
-                    alignment: center;
-                    Icon { source: Icons.search; colorize: Theme.text-muted; }
-                }
-                LineEdit {
-                    horizontal-stretch: 1;
-                    placeholder-text: "Filter all sections: HDR, Atmos, bit rate…";
-                    text <=> Bridge.info-filter;
-                    edited(text) => { Bridge.info-filter-edited(text); }
-                }
-                CaptionText {
-                    text: Bridge.info-rows.length == 1 ? "1 field" : Bridge.info-rows.length + " fields";
-                }
+// Filter + key/value table. Cross-fades and scrolls to the top when the
+// section changes. `stacked` puts each key above its value (narrow).
+component InfoTable inherits Card {
+    in property <bool> stacked;
+
+    // Drops to false for a moment when the section changes, so the table
+    // fades back in (see `states`).
+    property <bool> settled: true;
+    property <int> section: Bridge.info-section-index;
+    changed section => {
+        root.settled = false;
+        rows.viewport-y = 0;
+        settle.running = true;
+    }
+
+    states [
+        switching when !root.settled: {
+            table.opacity: 0;
+            out {
+                animate table.opacity { duration: Theme.duration-glide; easing: cubic-bezier(0.22, 1, 0.36, 1); }
             }
-            Divider { }
+        }
+    ]
 
-            if Bridge.info-rows.length == 0: VerticalLayout {
-                vertical-stretch: 1;
+    VerticalLayout {
+        HorizontalLayout {
+            padding: Theme.space-3;
+            spacing: Theme.space-3;
+            VerticalLayout {
                 alignment: center;
-                SecondaryText {
-                    text: Bridge.info-filter != "" ? "Nothing matches “" + Bridge.info-filter + "”." : "This section is empty.";
-                    horizontal-alignment: center;
+                Icon { source: Icons.search; colorize: Theme.text-muted; }
+            }
+            TextField {
+                horizontal-stretch: 1;
+                placeholder-text: "Filter all sections: HDR, Atmos, bit rate…";
+                text <=> Bridge.info-filter;
+                edited(text) => { Bridge.info-filter-edited(text); }
+            }
+            CaptionText {
+                text: Bridge.info-rows.length == 1 ? "1 field" : Bridge.info-rows.length + " fields";
+            }
+        }
+        Divider { }
+
+        table := Rectangle {
+            vertical-stretch: 1;
+
+            settle := Timer {
+                interval: 30ms;
+                running: false;
+                triggered => {
+                    self.running = false;
+                    root.settled = true;
                 }
             }
-            if Bridge.info-rows.length > 0: ListView {
-                vertical-stretch: 1;
+
+            rows := ListView {
+                visible: Bridge.info-rows.length > 0;
                 for row in Bridge.info-rows: Rectangle {
-                    HorizontalLayout {
-                        padding-left: Theme.space-4;
-                        padding-right: Theme.space-4;
-                        padding-top: Theme.space-2;
-                        padding-bottom: Theme.space-2;
-                        spacing: Theme.space-4;
-                        SecondaryText { text: row.key; width: 240px; wrap: word-wrap; vertical-alignment: top; }
-                        BodyText { text: row.value; horizontal-stretch: 1; wrap: word-wrap; vertical-alignment: top; }
+                    VerticalLayout {
+                        // Key and value side by side…
+                        if !root.stacked: HorizontalLayout {
+                            padding-left: Theme.space-4;
+                            padding-right: Theme.space-4;
+                            padding-top: Theme.space-2;
+                            padding-bottom: Theme.space-2;
+                            spacing: Theme.space-4;
+                            SecondaryText {
+                                text: row.key;
+                                width: Viewport.lg ? 240px : 180px;
+                                wrap: word-wrap;
+                                vertical-alignment: top;
+                            }
+                            BodyText { text: row.value; horizontal-stretch: 1; wrap: word-wrap; vertical-alignment: top; }
+                        }
+                        // …or the key above its value on narrow screens.
+                        if root.stacked: VerticalLayout {
+                            padding-left: Theme.space-4;
+                            padding-right: Theme.space-4;
+                            padding-top: Theme.space-2;
+                            padding-bottom: Theme.space-2;
+                            spacing: Theme.space-0-5;
+                            // Explicit widths so wrapped lines count toward the
+                            // row height.
+                            CaptionText { text: row.key; wrap: word-wrap; width: rows.visible-width - 2 * Theme.space-4; }
+                            BodyText { text: row.value; wrap: word-wrap; width: rows.visible-width - 2 * Theme.space-4; }
+                        }
                     }
                     Divider {
                         x: Theme.space-4;
@@ -81,6 +148,37 @@ export component MediaInfoView inherits HorizontalLayout {
                     }
                 }
             }
+            if Bridge.info-rows.length == 0: VerticalLayout {
+                alignment: center;
+                SecondaryText {
+                    text: Bridge.info-filter != "" ? "Nothing matches “" + Bridge.info-filter + "”." : "This section is empty.";
+                    horizontal-alignment: center;
+                }
+            }
         }
+    }
+}
+
+export component MediaInfoView inherits VerticalLayout {
+    if Viewport.md: HorizontalLayout {
+        vertical-stretch: 1;
+        spacing: Theme.space-4;
+        SectionList { width: Theme.sidebar-width; }
+        InfoTable { horizontal-stretch: 1; }
+    }
+    if !Viewport.md: VerticalLayout {
+        vertical-stretch: 1;
+        spacing: Theme.space-3;
+        VerticalLayout {
+            spacing: Theme.space-1-5;
+            OverlineText { label: "Section"; }
+            Select {
+                model: Bridge.info-sections;
+                current-index <=> Bridge.info-section-index;
+                enabled: Bridge.info-filter == "";
+                selected => { Bridge.info-section-selected(self.current-index); }
+            }
+        }
+        InfoTable { vertical-stretch: 1; stacked: true; }
     }
 }

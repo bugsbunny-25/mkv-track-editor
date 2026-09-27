@@ -4,8 +4,14 @@
 // Design system: `theme/` holds the tokens (colours, spacing, type, motion)
 // and icons, `components/` the reusable controls built on them, `views/`
 // the screens. Views never use raw colours or sizes — only `Theme` tokens.
+// Design language: Playful Geometric (see `theme/theme.slint`).
 
-import { Theme, Tone, Icons, Banner, EmptyState } from "components/index.slint";
+// Bundled so the UI looks the same everywhere (desktop and wasm). Both are
+// variable fonts under the SIL Open Font License (see `fonts/*-OFL.txt`).
+import "fonts/Outfit.ttf";
+import "fonts/PlusJakartaSans.ttf";
+
+import { Theme, Tone, Viewport, Icons, Banner, EmptyState, DotGrid } from "components/index.slint";
 import { Bridge, DocTabData, TrackRowData, InfoRowData, DirRow, BadgeData, TrackKind, DropState } from "bridge.slint";
 import { AppBar } from "views/app_bar.slint";
 import { DocumentView } from "views/document_view.slint";
@@ -19,17 +25,26 @@ export component AppWindow inherits Window {
     title: "MKV Track Editor";
     preferred-width: 1280px;
     preferred-height: 820px;
-    min-width: 900px;
-    min-height: 600px;
+    // Reflows down to 320px wide (WCAG 1.4.10) with no horizontal overflow.
+    min-width: 320px;
+    min-height: 480px;
     background: Theme.canvas;
     default-font-size: Theme.font-body;
+    default-font-family: Theme.family-body;
+
+    // Layouts read breakpoint flags from `Viewport`.
+    init => { Viewport.width = self.width; }
+    changed width => { Viewport.width = self.width; }
+
+    // Paper texture behind everything.
+    DotGrid { }
 
     VerticalLayout {
         AppBar { }
 
         if Bridge.error-message != "": HorizontalLayout {
-            padding-left: Theme.space-5;
-            padding-right: Theme.space-5;
+            padding-left: Viewport.gutter;
+            padding-right: Viewport.gutter;
             padding-top: Theme.space-4;
             Banner {
                 text: Bridge.error-message;

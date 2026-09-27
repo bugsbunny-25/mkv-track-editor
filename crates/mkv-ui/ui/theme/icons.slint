@@ -1,4 +1,4 @@
-// Icon registry. Icons are single-colour outline SVGs (24×24 grid, 1.75
+// Icon registry. Icons are single-colour outline SVGs (24×24 grid, chunky 2.5
 // stroke) tinted at runtime with `colorize`, so every icon follows the
 // theme. Reference icons by name (`Icons.audio`), never by file path.
 
@@ -25,6 +25,15 @@ export global Icons {
     out property <image> subtitle: @image-url("../icons/subtitle.svg");
     out property <image> sun: @image-url("../icons/sun.svg");
     out property <image> tag: @image-url("../icons/tag.svg");
+    out property <image> trash: @image-url("../icons/trash.svg");
     out property <image> video: @image-url("../icons/video.svg");
     out property <image> wand: @image-url("../icons/wand.svg");
+}
+
+// Tileable decoration images (single colour, tinted with `colorize`).
+export global Patterns {
+    // Dot grid for the canvas, one dot per `Theme.pattern-spacing` cell.
+    out property <image> dots: @image-url("../patterns/dots.svg");
+    // Diagonal candy stripes for progress bars.
+    out property <image> stripes: @image-url("../patterns/stripes.svg");
 }

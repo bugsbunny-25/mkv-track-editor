@@ -1,0 +1,18 @@
+// Responsive state. The window writes its width here; layouts read the
+// breakpoint flags (min-width semantics: `md` is true from 768px up) and
+// switch arrangement with plain `if`s — Slint's documented approach, since
+// it has no media queries.
+
+import { Theme } from "theme.slint";
+
+export global Viewport {
+    in-out property <length> width: Theme.bp-xl;
+
+    out property <bool> sm: width >= Theme.bp-sm;
+    out property <bool> md: width >= Theme.bp-md;
+    out property <bool> lg: width >= Theme.bp-lg;
+    out property <bool> xl: width >= Theme.bp-xl;
+
+    // Page gutter: roomy from `md` up, tight on phones.
+    out property <length> gutter: md ? Theme.space-5 : Theme.space-3;
+}
