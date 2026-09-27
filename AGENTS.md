@@ -44,6 +44,13 @@ easy to get wrong here.
   CLI is the prebuilt musl release matching the version in `Cargo.lock`
   (checksum-verified); keep it in sync with the lockfile, not pinned.
 - Keep `target/` in `.dockerignore`; the local one is tens of GB.
+- Never share a cargo registry cache mount (`/usr/local/cargo/registry`)
+  between stages that build in parallel: cargo's package lock is outside
+  the mount, so both unpack the same crate at once and one fails with
+  "failed to unpack package ... File exists". Give each stage (and each
+  platform) its own `id=`.
+- Pull request CI does not build the image; only `main` and `release/*`
+  do. Build it locally (see above) before merging Dockerfile changes.
 
 ## Cargo builds and `target/`
 
