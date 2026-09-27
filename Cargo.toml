@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mkv-types",
+    "crates/mkv-core",
+    "crates/mkv-volume",
+    "crates/mkv-profiles",
+    "crates/mkv-ui",
+    "crates/mkv-desktop",
+    "crates/mkv-server",
+    "crates/mkv-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+mkv-types = { path = "crates/mkv-types" }
+mkv-core = { path = "crates/mkv-core" }
+mkv-volume = { path = "crates/mkv-volume" }
+mkv-ui = { path = "crates/mkv-ui" }
+mkv-profiles = { path = "crates/mkv-profiles" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "process", "macros", "sync", "io-util", "time", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+getrandom = "0.3"
+tokio-util = "0.7"
+
+[profile.release]
+opt-level = 2

@@ -1,0 +1,38 @@
+// Purely presentational state that outlives individual views (so it
+// survives page switches) but that the Rust view-model never needs.
+
+import { Icons, Tone } from "../components/index.slint";
+import { TrackKind } from "../bridge.slint";
+
+export enum DocumentPage {
+    tracks,
+    media-info,
+    naming,
+}
+
+export global ViewState {
+    in-out property <DocumentPage> page: DocumentPage.tracks;
+    // Row of `Bridge.tracks` shown in the inspector.
+    in-out property <int> selected-track: 0;
+}
+
+// Presentation of a track kind: icon, tone and label.
+export global TrackStyle {
+    public pure function icon(kind: TrackKind) -> image {
+        if (kind == TrackKind.video) { return Icons.video; }
+        if (kind == TrackKind.audio) { return Icons.audio; }
+        return Icons.subtitle;
+    }
+
+    public pure function tone(kind: TrackKind) -> Tone {
+        if (kind == TrackKind.video) { return Tone.video; }
+        if (kind == TrackKind.audio) { return Tone.audio; }
+        return Tone.subtitle;
+    }
+
+    public pure function label(kind: TrackKind) -> string {
+        if (kind == TrackKind.video) { return "Video"; }
+        if (kind == TrackKind.audio) { return "Audio"; }
+        return "Subtitle";
+    }
+}

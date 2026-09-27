@@ -1,0 +1,54 @@
+// Root window. Layout: app bar on top, then exactly one of settings, the
+// library browser (web), the empty state or the active document.
+//
+// Design system: `theme/` holds the tokens (colours, spacing, type, motion)
+// and icons, `components/` the reusable controls built on them, `views/`
+// the screens. Views never use raw colours or sizes — only `Theme` tokens.
+
+import { Theme, Tone, Icons, Banner, EmptyState } from "components/index.slint";
+import { Bridge, DocTabData, TrackRowData, InfoRowData, DirRow, BadgeData, TrackKind } from "bridge.slint";
+import { AppBar } from "views/app_bar.slint";
+import { DocumentView } from "views/document_view.slint";
+import { SettingsView } from "views/settings_view.slint";
+import { VolumeBrowser } from "views/volume_browser.slint";
+
+export { Bridge, DocTabData, TrackRowData, InfoRowData, DirRow, BadgeData, TrackKind, Tone }
+
+export component AppWindow inherits Window {
+    title: "MKV Track Editor";
+    preferred-width: 1280px;
+    preferred-height: 820px;
+    min-width: 900px;
+    min-height: 600px;
+    background: Theme.canvas;
+    default-font-size: Theme.font-body;
+
+    VerticalLayout {
+        AppBar { }
+
+        if Bridge.error-message != "": HorizontalLayout {
+            padding-left: Theme.space-5;
+            padding-right: Theme.space-5;
+            padding-top: Theme.space-4;
+            Banner {
+                text: Bridge.error-message;
+                tone: Tone.danger;
+                dismissable: true;
+                dismiss => { Bridge.dismiss-error(); }
+            }
+        }
+
+        if Bridge.show-settings: SettingsView { vertical-stretch: 1; }
+        if !Bridge.show-settings && Bridge.show-browser: VolumeBrowser { vertical-stretch: 1; }
+        if !Bridge.show-settings && !Bridge.show-browser && Bridge.active-tab < 0: EmptyState {
+            vertical-stretch: 1;
+            icon: Icons.movie;
+            title: "Open an MKV file to get started";
+            message: "Each file opens in its own tab with your default profile applied. Nothing is re-encoded.";
+            action-text: "Open files";
+            action-icon: Icons.plus;
+            action => { Bridge.open-requested(); }
+        }
+        if !Bridge.show-settings && !Bridge.show-browser && Bridge.active-tab >= 0: DocumentView { vertical-stretch: 1; }
+    }
+}

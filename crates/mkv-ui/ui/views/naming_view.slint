@@ -1,0 +1,194 @@
+// Editable identity of the file (prefilled from the release name) that
+// feeds the Radarr/Sonarr-style output name, with a live preview.
+
+import { ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import {
+    Theme, Tone, Icons, IconTile, Card, SectionCard, Banner, FormField, OverlineText, CaptionText,
+} from "../components/index.slint";
+import { Bridge } from "../bridge.slint";
+
+export component NamingView inherits ScrollView {
+    VerticalLayout {
+        width: root.visible-width;
+        // Gutter so cards (and their shadows) clear the scrollbar.
+        padding-right: Theme.space-3;
+        padding-bottom: Theme.space-1;
+        spacing: Theme.space-4;
+        alignment: start;
+
+        Card {
+            VerticalLayout {
+                padding: Theme.space-4;
+                spacing: Theme.space-3;
+                HorizontalLayout {
+                    spacing: Theme.space-3;
+                    VerticalLayout {
+                        alignment: center;
+                        IconTile { icon: Icons.tag; tone: Tone.accent; }
+                    }
+                    VerticalLayout {
+                        spacing: Theme.space-1;
+                        horizontal-stretch: 1;
+                        OverlineText { text: "Output file name"; }
+                        Text {
+                            text: Bridge.preview-name;
+                            wrap: word-wrap;
+                            font-size: Theme.font-title;
+                            font-weight: Theme.weight-medium;
+                            color: Theme.text-primary;
+                        }
+                    }
+                }
+                if Bridge.preview-problem != "": Banner { text: Bridge.preview-problem; tone: Tone.danger; }
+            }
+        }
+
+        SectionCard {
+            title: "Title";
+            description: "Prefilled from the release name. IDs are optional.";
+            GridLayout {
+                spacing-horizontal: Theme.space-4;
+                spacing-vertical: Theme.space-3;
+                Row {
+                    FormField {
+                        label: "Type";
+                        ComboBox {
+                            model: ["Movie", "Episode"];
+                            current-index <=> Bridge.kind-index;
+                            selected => { Bridge.naming-edited(); }
+                        }
+                    }
+                    FormField {
+                        label: "Source";
+                        ComboBox {
+                            model: Bridge.source-names;
+                            current-index <=> Bridge.source-index;
+                            selected => { Bridge.naming-edited(); }
+                        }
+                    }
+                }
+                Row {
+                    FormField {
+                        label: Bridge.kind-index == 0 ? "Title" : "Series";
+                        LineEdit { text <=> Bridge.meta-title; edited => { Bridge.naming-edited(); } }
+                    }
+                    FormField {
+                        label: "Year";
+                        LineEdit { text <=> Bridge.meta-year; edited => { Bridge.naming-edited(); } }
+                    }
+                }
+                Row {
+                    FormField {
+                        label: "TMDb ID";
+                        LineEdit {
+                            text <=> Bridge.meta-tmdb;
+                            placeholder-text: "603";
+                            edited => { Bridge.naming-edited(); }
+                        }
+                    }
+                    FormField {
+                        label: "IMDb ID";
+                        LineEdit {
+                            text <=> Bridge.meta-imdb;
+                            placeholder-text: "tt0133093";
+                            edited => { Bridge.naming-edited(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        SectionCard {
+            title: "Release";
+            GridLayout {
+                spacing-horizontal: Theme.space-4;
+                spacing-vertical: Theme.space-3;
+                Row {
+                    FormField {
+                        label: "Edition";
+                        LineEdit {
+                            text <=> Bridge.meta-edition;
+                            placeholder-text: "Director's Cut";
+                            edited => { Bridge.naming-edited(); }
+                        }
+                    }
+                    FormField {
+                        label: "Revision";
+                        ComboBox {
+                            model: Bridge.revision-names;
+                            current-index <=> Bridge.revision-index;
+                            selected => { Bridge.naming-edited(); }
+                        }
+                    }
+                }
+                Row {
+                    FormField {
+                        label: "Custom formats";
+                        LineEdit {
+                            text <=> Bridge.meta-custom-formats;
+                            placeholder-text: "IMAX Enhanced";
+                            edited => { Bridge.naming-edited(); }
+                        }
+                    }
+                    FormField {
+                        label: "Release group";
+                        LineEdit { text <=> Bridge.meta-group; edited => { Bridge.naming-edited(); } }
+                    }
+                }
+            }
+        }
+
+        // Episode fields stay visible (disabled for movies) so the layout
+        // doesn't jump when switching type.
+        SectionCard {
+            title: "Episode";
+            description: Bridge.kind-index == 1 ? "" : "Switch the type to Episode to use these fields.";
+            GridLayout {
+                spacing-horizontal: Theme.space-4;
+                spacing-vertical: Theme.space-3;
+                Row {
+                    FormField {
+                        label: "Season";
+                        LineEdit {
+                            enabled: Bridge.kind-index == 1;
+                            text <=> Bridge.meta-season;
+                            edited => { Bridge.naming-edited(); }
+                        }
+                    }
+                    FormField {
+                        label: "Episodes";
+                        LineEdit {
+                            enabled: Bridge.kind-index == 1;
+                            text <=> Bridge.meta-episodes;
+                            placeholder-text: "2 or 2-3";
+                            edited => { Bridge.naming-edited(); }
+                        }
+                    }
+                }
+                Row {
+                    FormField {
+                        label: "Episode title";
+                        LineEdit {
+                            enabled: Bridge.kind-index == 1;
+                            text <=> Bridge.meta-episode-title;
+                            edited => { Bridge.naming-edited(); }
+                        }
+                    }
+                    FormField {
+                        label: "TVDB ID";
+                        LineEdit {
+                            enabled: Bridge.kind-index == 1;
+                            text <=> Bridge.meta-tvdb;
+                            edited => { Bridge.naming-edited(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        CaptionText {
+            text: "Formats are configured in Settings and follow Radarr/Sonarr token syntax. Audio and video tokens reflect the tracks you keep.";
+            wrap: word-wrap;
+        }
+    }
+}

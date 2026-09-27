@@ -1,0 +1,25 @@
+[package]
+name = "mkv-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+mkv-types.workspace = true
+mkv-ui.workspace = true
+mkv-profiles.workspace = true
+slint = "1"
+serde.workspace = true
+serde_json.workspace = true
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+gloo-net = "0.6"
+console_error_panic_hook = "0.1"
+getrandom = { workspace = true, features = ["wasm_js"] }
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["EventSource", "MessageEvent", "Event", "console"]

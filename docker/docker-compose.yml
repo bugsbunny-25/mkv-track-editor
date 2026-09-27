@@ -1,0 +1,28 @@
+services:
+  mkv-track-editor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    # The container runs as an unprivileged user; ./output and ./config must
+    # be writable by it. Easiest: run as your own UID/GID (see `id -u`/`id -g`).
+    # user: "1000:1000"
+    ports:
+      - "8080:8080"
+    volumes:
+      # Read-only source library, browsable in the web UI.
+      - ./library:/data/library:ro
+      # Where edited files are written; kept separate from the source
+      # library by default.
+      - ./output:/data/output
+      # Profiles and naming templates (config.toml), created with defaults
+      # on first start and editable from the Settings tab.
+      - ./config:/config
+    environment:
+      # name=path pairs, comma-separated; add more roots as needed, e.g.
+      # MKV_LIBRARY_ROOTS=movies=/data/movies,shows=/data/shows
+      MKV_LIBRARY_ROOTS: library=/data/library
+      MKV_OUTPUT_ROOT: /data/output
+      MKV_CONFIG_DIR: /config
+      PORT: "8080"
+      RUST_LOG: info
+    restart: unless-stopped

@@ -1,0 +1,67 @@
+// Primitive colour palette — the only place raw colour values live.
+//
+// Nothing outside `ui/theme/` may reference `Swatches`: components and
+// views consume the semantic tokens in `Theme`, which map these primitives
+// per colour scheme. Changing a hue here restyles the whole app.
+
+export global Swatches {
+    // Neutral (cool grey), light → dark.
+    out property <color> neutral-0: #ffffff;
+    out property <color> neutral-25: #fafafb;
+    out property <color> neutral-50: #f5f5f7;
+    out property <color> neutral-100: #ededf0;
+    out property <color> neutral-150: #e3e3e8;
+    out property <color> neutral-200: #d4d4db;
+    out property <color> neutral-300: #b4b4be;
+    out property <color> neutral-400: #8b8b96;
+    out property <color> neutral-500: #6b6b76;
+    out property <color> neutral-600: #52525c;
+    out property <color> neutral-700: #3a3a42;
+    out property <color> neutral-800: #28282e;
+    out property <color> neutral-850: #1e1e23;
+    out property <color> neutral-900: #17171b;
+    out property <color> neutral-950: #0f0f12;
+
+    // Violet — brand / accent.
+    out property <color> violet-50: #f0efff;
+    out property <color> violet-100: #e1deff;
+    out property <color> violet-300: #aba3fa;
+    out property <color> violet-400: #8c82f5;
+    out property <color> violet-500: #6e62ec;
+    out property <color> violet-600: #5a4ed8;
+    out property <color> violet-700: #483db5;
+    out property <color> violet-800: #2e2870;
+    out property <color> violet-900: #221d52;
+
+    // Status hues.
+    out property <color> green-50: #e8f7ef;
+    out property <color> green-400: #3dbe82;
+    out property <color> green-600: #16865a;
+    out property <color> green-800: #11402d;
+
+    out property <color> amber-50: #fdf3e1;
+    out property <color> amber-400: #f0a63a;
+    out property <color> amber-600: #9c5f09;
+    out property <color> amber-800: #4a300a;
+
+    out property <color> red-50: #fdecec;
+    out property <color> red-400: #f07171;
+    out property <color> red-600: #c93838;
+    out property <color> red-800: #4d1a1a;
+
+    // Track-type category hues.
+    out property <color> blue-50: #e8f1fd;
+    out property <color> blue-400: #6aa6f2;
+    out property <color> blue-600: #2466c2;
+    out property <color> blue-800: #15325c;
+
+    out property <color> teal-50: #e3f6f3;
+    out property <color> teal-400: #3cc0ae;
+    out property <color> teal-600: #0f7f72;
+    out property <color> teal-800: #0d3d37;
+
+    out property <color> orange-50: #fdeee6;
+    out property <color> orange-400: #f08a5d;
+    out property <color> orange-600: #b8501f;
+    out property <color> orange-800: #4a2210;
+}

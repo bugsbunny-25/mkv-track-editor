@@ -1,0 +1,14 @@
+[package]
+name = "mkv-profiles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Pure logic, no I/O: compiled into the native binaries *and* the wasm UI, so
+# the browser can apply profiles and preview file names locally.
+[dependencies]
+mkv-types.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+regex = "1"
+toml = "0.9"

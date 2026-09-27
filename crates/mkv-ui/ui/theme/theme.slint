@@ -1,0 +1,143 @@
+// Semantic design tokens. Components and views style themselves only
+// through `Theme` (and `Tone` for semantic colouring) — never raw colours,
+// sizes or font sizes.
+//
+// The scheme follows the std-widgets `Palette`, so our components and the
+// stock text inputs / combo boxes always agree on light vs dark.
+
+import { Palette } from "std-widgets.slint";
+import { Swatches } from "swatches.slint";
+
+// Semantic colour role for badges, banners, icon tiles and status dots.
+export enum Tone {
+    neutral,
+    accent,
+    success,
+    warning,
+    danger,
+    // Track-type categories.
+    video,
+    audio,
+    subtitle,
+}
+
+export global Theme {
+    // --- scheme ------------------------------------------------------------
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+
+    // --- surfaces ----------------------------------------------------------
+    // Window background, behind cards.
+    out property <color> canvas: dark ? Swatches.neutral-950 : Swatches.neutral-50;
+    // Cards, bars, panels.
+    out property <color> surface: dark ? Swatches.neutral-900 : Swatches.neutral-0;
+    // Wells inside a surface: segmented-control track, header tiles.
+    out property <color> surface-muted: dark ? Swatches.neutral-850 : Swatches.neutral-100;
+    out property <color> border: dark ? Swatches.neutral-800 : Swatches.neutral-150;
+    out property <color> border-strong: dark ? Swatches.neutral-700 : Swatches.neutral-200;
+    out property <color> shadow: dark ? transparent : Swatches.neutral-950.with-alpha(0.06);
+
+    // --- text --------------------------------------------------------------
+    out property <color> text-primary: dark ? Swatches.neutral-100 : Swatches.neutral-900;
+    out property <color> text-secondary: dark ? Swatches.neutral-300 : Swatches.neutral-600;
+    out property <color> text-muted: dark ? Swatches.neutral-500 : Swatches.neutral-400;
+    out property <color> text-disabled: dark ? Swatches.neutral-700 : Swatches.neutral-300;
+
+    // --- accent ------------------------------------------------------------
+    out property <color> accent: dark ? Swatches.violet-500 : Swatches.violet-600;
+    out property <color> accent-hover: dark ? Swatches.violet-400 : Swatches.violet-700;
+    out property <color> accent-subtle: dark ? Swatches.violet-900 : Swatches.violet-50;
+    out property <color> accent-text: dark ? Swatches.violet-300 : Swatches.violet-700;
+    out property <color> on-accent: Swatches.neutral-0;
+    out property <color> focus-ring: accent;
+
+    // --- interaction states (overlays on any surface) -----------------------
+    out property <color> state-hover: text-primary.with-alpha(0.05);
+    out property <color> state-pressed: text-primary.with-alpha(0.09);
+    out property <color> state-selected: accent-subtle;
+    out property <color> toggle-off: dark ? Swatches.neutral-700 : Swatches.neutral-200;
+    out property <color> toggle-knob: Swatches.neutral-0;
+
+    // --- spacing (4px grid) ------------------------------------------------
+    out property <length> space-0-5: 2px;
+    out property <length> space-1: 4px;
+    out property <length> space-1-5: 6px;
+    out property <length> space-2: 8px;
+    out property <length> space-3: 12px;
+    out property <length> space-4: 16px;
+    out property <length> space-5: 20px;
+    out property <length> space-6: 24px;
+    out property <length> space-8: 32px;
+
+    // --- radius ------------------------------------------------------------
+    out property <length> radius-sm: 6px;
+    out property <length> radius-md: 8px;
+    out property <length> radius-lg: 12px;
+    out property <length> radius-full: 999px;
+
+    // --- typography --------------------------------------------------------
+    out property <length> font-caption: 11px;
+    out property <length> font-small: 12px;
+    out property <length> font-body: 13px;
+    out property <length> font-title: 15px;
+    out property <length> font-headline: 18px;
+    out property <length> font-display: 22px;
+    out property <int> weight-regular: 400;
+    out property <int> weight-medium: 500;
+    out property <int> weight-semibold: 600;
+
+    // --- sizing ------------------------------------------------------------
+    out property <length> control-height: 32px;
+    out property <length> control-height-sm: 26px;
+    out property <length> icon-xs: 12px;
+    out property <length> icon-sm: 14px;
+    out property <length> icon-md: 16px;
+    out property <length> icon-lg: 20px;
+    out property <length> icon-xl: 24px;
+    out property <length> tile-xs: 24px;
+    out property <length> tile-sm: 28px;
+    out property <length> tile-md: 34px;
+    out property <length> tile-lg: 48px;
+    out property <length> badge-height: 22px;
+    out property <length> progress-height: 6px;
+    out property <length> sidebar-width: 220px;
+    out property <length> app-bar-height: 52px;
+    out property <length> track-row-height: 58px;
+    out property <length> inspector-width: 320px;
+    out property <length> border-width: 1px;
+
+    // --- motion ------------------------------------------------------------
+    out property <duration> duration-fast: 120ms;
+    out property <duration> duration-medium: 200ms;
+
+    // --- tones -------------------------------------------------------------
+    // Foreground for text/icons in a tone; readable on `tone-background`.
+    public pure function tone-foreground(tone: Tone) -> color {
+        if (tone == Tone.accent) { return accent-text; }
+        if (tone == Tone.success) { return dark ? Swatches.green-400 : Swatches.green-600; }
+        if (tone == Tone.warning) { return dark ? Swatches.amber-400 : Swatches.amber-600; }
+        if (tone == Tone.danger) { return dark ? Swatches.red-400 : Swatches.red-600; }
+        if (tone == Tone.video) { return dark ? Swatches.blue-400 : Swatches.blue-600; }
+        if (tone == Tone.audio) { return dark ? Swatches.teal-400 : Swatches.teal-600; }
+        if (tone == Tone.subtitle) { return dark ? Swatches.orange-400 : Swatches.orange-600; }
+        return text-secondary;
+    }
+
+    // Tinted fill for chips, tiles and banners.
+    public pure function tone-background(tone: Tone) -> color {
+        if (tone == Tone.accent) { return accent-subtle; }
+        if (tone == Tone.success) { return dark ? Swatches.green-800 : Swatches.green-50; }
+        if (tone == Tone.warning) { return dark ? Swatches.amber-800 : Swatches.amber-50; }
+        if (tone == Tone.danger) { return dark ? Swatches.red-800 : Swatches.red-50; }
+        if (tone == Tone.video) { return dark ? Swatches.blue-800 : Swatches.blue-50; }
+        if (tone == Tone.audio) { return dark ? Swatches.teal-800 : Swatches.teal-50; }
+        if (tone == Tone.subtitle) { return dark ? Swatches.orange-800 : Swatches.orange-50; }
+        return surface-muted;
+    }
+
+    // Saturated colour for dots, bars and borders.
+    public pure function tone-solid(tone: Tone) -> color {
+        if (tone == Tone.accent) { return accent; }
+        if (tone == Tone.neutral) { return text-muted; }
+        return tone-foreground(tone);
+    }
+}

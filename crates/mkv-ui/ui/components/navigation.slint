@@ -1,0 +1,95 @@
+import { Theme, Tone } from "../theme/theme.slint";
+import { Icon, IconTile } from "icon.slint";
+import { Button, ButtonVariant } from "button.slint";
+import { DisplayText, SecondaryText } from "typography.slint";
+
+// Selectable row in a sidebar or list (media-info sections, file browser).
+export component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <string> trailing;
+    in property <image> icon;
+    in property <Tone> icon-tone: Tone.neutral;
+    in property <bool> selected;
+    callback clicked();
+
+    height: 34px;
+    border-radius: Theme.radius-sm;
+    background: selected ? Theme.state-selected : (touch.has-hover ? Theme.state-hover : transparent);
+    accessible-role: list-item;
+    accessible-label: text;
+    accessible-item-selected: selected;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Theme.duration-fast; }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.space-2 + Theme.space-0-5;
+        padding-right: Theme.space-2 + Theme.space-0-5;
+        spacing: Theme.space-2;
+
+        if root.icon.width > 0: VerticalLayout {
+            alignment: center;
+            IconTile { icon: root.icon; tone: root.icon-tone; size: Theme.tile-xs; icon-size: Theme.icon-sm; }
+        }
+        Text {
+            text: root.text;
+            overflow: elide;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            font-size: Theme.font-body;
+            font-weight: root.selected ? Theme.weight-medium : Theme.weight-regular;
+            color: root.selected ? Theme.accent-text : Theme.text-primary;
+        }
+        if root.trailing != "": Text {
+            text: root.trailing;
+            vertical-alignment: center;
+            font-size: Theme.font-small;
+            color: Theme.text-muted;
+        }
+    }
+}
+
+// Centred placeholder for an empty view: an invitation, not an apology.
+export component EmptyState inherits VerticalLayout {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> message;
+    in property <string> action-text;
+    in property <image> action-icon;
+    callback action();
+
+    alignment: center;
+    spacing: Theme.space-4;
+    padding: Theme.space-8;
+
+    HorizontalLayout {
+        alignment: center;
+        IconTile { icon: root.icon; tone: Tone.accent; size: Theme.tile-lg; icon-size: Theme.icon-xl; }
+    }
+    VerticalLayout {
+        spacing: Theme.space-2;
+        DisplayText { text: root.title; horizontal-alignment: center; }
+        HorizontalLayout {
+            alignment: center;
+            SecondaryText {
+                text: root.message;
+                max-width: 420px;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+            }
+        }
+    }
+    if root.action-text != "": HorizontalLayout {
+        alignment: center;
+        Button {
+            text: root.action-text;
+            icon: root.action-icon;
+            variant: ButtonVariant.primary;
+            clicked => { root.action(); }
+        }
+    }
+}

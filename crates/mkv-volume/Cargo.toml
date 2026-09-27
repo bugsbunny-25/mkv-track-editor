@@ -1,0 +1,12 @@
+[package]
+name = "mkv-volume"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mkv-types.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

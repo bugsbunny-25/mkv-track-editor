@@ -1,0 +1,146 @@
+// Top bar: brand, one chip per open file (Slint's TabWidget only supports a
+// static set of tabs, while files are opened and closed dynamically), and
+// global actions.
+
+import { Palette } from "std-widgets.slint";
+import {
+    Theme, Tone, Icons, Icon, IconTile, StatusDot, Button, IconButton, ButtonVariant, ControlSize, CaptionText, Divider,
+} from "../components/index.slint";
+import { Bridge, DocTabData } from "../bridge.slint";
+
+component FileTab inherits Rectangle {
+    in property <DocTabData> data;
+    in property <bool> active;
+    callback clicked();
+    callback close();
+
+    property <Tone> status-tone: {
+        if (data.failed) { return Tone.danger; }
+        if (data.done) { return Tone.success; }
+        return Tone.accent;
+    }
+    property <bool> show-status: data.failed || data.done || data.changed;
+
+    height: Theme.control-height;
+    min-width: 120px;
+    preferred-width: 220px;
+    max-width: 260px;
+    border-radius: Theme.radius-md;
+    background: active ? Theme.surface-muted : (touch.has-hover ? Theme.state-hover : transparent);
+    accessible-role: tab;
+    accessible-label: data.title;
+    accessible-item-selected: active;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Theme.duration-fast; }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.space-3;
+        padding-right: Theme.space-1;
+        spacing: Theme.space-2;
+
+        if root.data.busy: Text {
+            text: root.data.progress + "%";
+            color: Theme.accent-text;
+            font-size: Theme.font-caption;
+            font-weight: Theme.weight-semibold;
+            vertical-alignment: center;
+        }
+        if !root.data.busy && root.show-status: VerticalLayout {
+            alignment: center;
+            StatusDot { tone: root.status-tone; }
+        }
+        Text {
+            text: root.data.title;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            font-size: Theme.font-body;
+            font-weight: root.active ? Theme.weight-medium : Theme.weight-regular;
+            color: root.active ? Theme.text-primary : Theme.text-secondary;
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: Icons.close;
+                size: ControlSize.small;
+                enabled: !root.data.busy;
+                accessible-name: "Close " + root.data.title;
+                clicked => { root.close(); }
+            }
+        }
+    }
+}
+
+export component AppBar inherits Rectangle {
+    height: Theme.app-bar-height;
+    background: Theme.surface;
+
+    HorizontalLayout {
+        padding-left: Theme.space-4;
+        padding-right: Theme.space-3;
+        padding-top: (Theme.app-bar-height - Theme.control-height) / 2;
+        padding-bottom: self.padding-top;
+        spacing: Theme.space-1;
+
+        HorizontalLayout {
+            spacing: Theme.space-2;
+            padding-right: Theme.space-3;
+            VerticalLayout {
+                alignment: center;
+                IconTile { icon: Icons.movie; tone: Tone.accent; size: Theme.tile-sm; }
+            }
+            Text {
+                text: "Track Editor";
+                font-size: Theme.font-title;
+                font-weight: Theme.weight-semibold;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+        }
+
+        for tab[i] in Bridge.tabs: FileTab {
+            data: tab;
+            active: i == Bridge.active-tab && !Bridge.show-settings && !Bridge.show-browser;
+            clicked => { Bridge.select-tab(i); }
+            close => { Bridge.close-tab(i); }
+        }
+        IconButton {
+            icon: Icons.plus;
+            enabled: !Bridge.loading;
+            accessible-name: "Open files";
+            clicked => { Bridge.open-requested(); }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        if Bridge.loading: HorizontalLayout {
+            spacing: Theme.space-1-5;
+            padding-right: Theme.space-2;
+            VerticalLayout {
+                alignment: center;
+                StatusDot { tone: Tone.accent; }
+            }
+            CaptionText { text: "Analyzing…"; }
+        }
+        IconButton {
+            icon: Theme.dark ? Icons.sun : Icons.moon;
+            accessible-name: Theme.dark ? "Switch to light mode" : "Switch to dark mode";
+            clicked => { Palette.color-scheme = Theme.dark ? ColorScheme.light : ColorScheme.dark; }
+        }
+        IconButton {
+            icon: Icons.settings;
+            selected: Bridge.show-settings;
+            accessible-name: "Settings";
+            clicked => { Bridge.toggle-settings(); }
+        }
+    }
+
+    Divider {
+        y: parent.height - self.height;
+    }
+}

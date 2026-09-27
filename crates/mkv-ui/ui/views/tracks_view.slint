@@ -1,0 +1,227 @@
+// Tracks page: profile toolbar, the track list (keep toggle, type, summary
+// and active flags per row) and the inspector for the selected track.
+
+import { ComboBox, ListView } from "std-widgets.slint";
+import {
+    Theme, Tone, Icons, IconTile, Badge, Toggle, Button, IconButton, ButtonVariant, ControlSize, Card, Divider,
+    TitleText, LabelText, CaptionText,
+} from "../components/index.slint";
+import { Bridge, TrackRowData } from "../bridge.slint";
+import { ViewState, TrackStyle } from "view_state.slint";
+import { TrackInspector } from "track_inspector.slint";
+
+component ProfileToolbar inherits HorizontalLayout {
+    spacing: Theme.space-2;
+
+    CaptionText { text: "Profile"; }
+    ComboBox {
+        width: 170px;
+        model: Bridge.profile-names;
+        current-index <=> Bridge.profile-index;
+        selected => { Bridge.profile-selected(self.current-index); }
+    }
+    Rectangle { width: Theme.space-2; }
+    CaptionText { text: "Original language"; }
+    ComboBox {
+        width: 200px;
+        model: Bridge.language-labels;
+        current-index <=> Bridge.language-index;
+        selected => { Bridge.language-selected(self.current-index); }
+    }
+    Rectangle { width: Theme.space-2; }
+    Button {
+        text: "Apply profile";
+        icon: Icons.wand;
+        enabled: !Bridge.busy;
+        clicked => { Bridge.apply-profile(); }
+    }
+    Button {
+        text: "Reset";
+        icon: Icons.reset;
+        variant: ButtonVariant.ghost;
+        enabled: !Bridge.busy;
+        clicked => { Bridge.reset-tracks(); }
+    }
+    Rectangle { horizontal-stretch: 1; }
+    if Bridge.doc-count > 1: Button {
+        text: "Apply to all";
+        icon: Icons.copy-all;
+        variant: ButtonVariant.ghost;
+        enabled: !Bridge.any-busy;
+        clicked => { Bridge.apply-all(); }
+    }
+}
+
+component TrackRow inherits Rectangle {
+    in property <TrackRowData> track;
+    in property <int> index;
+    in property <bool> selected;
+    callback select();
+
+    property <bool> show-actions: touch.has-hover || selected;
+    property <string> summary: track.codec
+        + (track.detail != "" ? "  ·  " + track.detail : "")
+        + (track.language-name != "" ? "  ·  " + track.language-name : "");
+
+    height: Theme.track-row-height;
+    background: selected ? Theme.state-selected : (touch.has-hover ? Theme.state-hover : transparent);
+    accessible-role: list-item;
+    accessible-label: TrackStyle.label(track.kind) + " " + track.ordinal + ": " + track.name;
+    accessible-item-selected: selected;
+    accessible-action-default => { root.select(); }
+    animate background { duration: Theme.duration-fast; }
+
+    touch := TouchArea {
+        clicked => { root.select(); }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.space-4;
+        padding-right: Theme.space-2;
+        spacing: Theme.space-3;
+
+        VerticalLayout {
+            alignment: center;
+            Toggle {
+                checked: root.track.keep;
+                accessible-name: "Keep track";
+                toggled(value) => { Bridge.set-keep(root.index, value); }
+            }
+        }
+
+        // Everything but the keep toggle recedes when a track is dropped.
+        HorizontalLayout {
+            spacing: Theme.space-3;
+            horizontal-stretch: 1;
+            opacity: root.track.keep ? 1 : 0.45;
+
+            VerticalLayout {
+                alignment: center;
+                IconTile { icon: TrackStyle.icon(root.track.kind); tone: TrackStyle.tone(root.track.kind); }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: Theme.space-0-5;
+                horizontal-stretch: 1;
+                LabelText {
+                    text: root.track.name != "" ? root.track.name : TrackStyle.label(root.track.kind) + " " + root.track.ordinal;
+                    color: root.track.name != "" ? Theme.text-primary : Theme.text-secondary;
+                    overflow: elide;
+                }
+                CaptionText { text: root.summary; overflow: elide; }
+            }
+            HorizontalLayout {
+                spacing: Theme.space-1;
+                alignment: end;
+                if !root.track.keep: VerticalLayout { alignment: center; Badge { text: "Dropped"; } }
+                if root.track.is-default: VerticalLayout { alignment: center; Badge { text: "Default"; tone: Tone.accent; } }
+                if root.track.is-forced: VerticalLayout { alignment: center; Badge { text: "Forced"; tone: Tone.warning; } }
+                if root.track.is-original: VerticalLayout { alignment: center; Badge { text: "Original"; tone: Tone.success; } }
+                if root.track.is-hi: VerticalLayout { alignment: center; Badge { text: "SDH"; } }
+                if root.track.is-vi: VerticalLayout { alignment: center; Badge { text: "AD"; } }
+                if root.track.is-commentary: VerticalLayout { alignment: center; Badge { text: "Commentary"; } }
+            }
+        }
+
+        // Reorder within the track's type; hidden (but space-holding) until
+        // the row is hovered or selected to keep the list calm.
+        HorizontalLayout {
+            visible: root.show-actions;
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: Icons.chevron-up;
+                    size: ControlSize.small;
+                    enabled: root.track.can-up;
+                    accessible-name: "Move up";
+                    clicked => {
+                        Bridge.move-track(root.index, root.index - 1);
+                        ViewState.selected-track = root.index - 1;
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: Icons.chevron-down;
+                    size: ControlSize.small;
+                    enabled: root.track.can-down;
+                    accessible-name: "Move down";
+                    clicked => {
+                        Bridge.move-track(root.index, root.index + 1);
+                        ViewState.selected-track = root.index + 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Divider {
+        x: Theme.space-4;
+        y: parent.height - self.height;
+        width: parent.width - Theme.space-4;
+    }
+}
+
+component TrackList inherits Card {
+    VerticalLayout {
+        HorizontalLayout {
+            padding-left: Theme.space-4;
+            padding-right: Theme.space-4;
+            padding-top: Theme.space-3;
+            padding-bottom: Theme.space-3;
+            spacing: Theme.space-2;
+            TitleText { text: "Tracks"; vertical-alignment: center; }
+            CaptionText { text: Bridge.tracks.length; }
+            Rectangle { horizontal-stretch: 1; }
+            if Bridge.change-count > 0: VerticalLayout {
+                alignment: center;
+                Badge {
+                    text: Bridge.change-count == 1 ? "1 change" : Bridge.change-count + " changes";
+                    tone: Tone.accent;
+                }
+            }
+        }
+        Divider { }
+
+        // Arrow keys move the selection once the list has focus.
+        list-focus := FocusScope {
+            vertical-stretch: 1;
+            key-pressed(event) => {
+                if (event.text == Key.UpArrow && ViewState.selected-track > 0) {
+                    ViewState.selected-track -= 1;
+                    return accept;
+                }
+                if (event.text == Key.DownArrow && ViewState.selected-track < Bridge.tracks.length - 1) {
+                    ViewState.selected-track += 1;
+                    return accept;
+                }
+                reject
+            }
+
+            ListView {
+                for row[i] in Bridge.tracks: TrackRow {
+                    track: row;
+                    index: i;
+                    selected: i == ViewState.selected-track;
+                    select => {
+                        ViewState.selected-track = i;
+                        list-focus.focus();
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component TracksView inherits VerticalLayout {
+    spacing: Theme.space-3;
+
+    ProfileToolbar { }
+    HorizontalLayout {
+        spacing: Theme.space-4;
+        vertical-stretch: 1;
+        TrackList { horizontal-stretch: 1; }
+        TrackInspector { width: Theme.inspector-width; }
+    }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "mkv-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mkv-track-editor"
+path = "src/main.rs"
+
+[dependencies]
+mkv-types.workspace = true
+mkv-core.workspace = true
+mkv-ui.workspace = true
+mkv-profiles.workspace = true
+directories = "6"
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+slint = "1"
+rfd = "0.15"

@@ -1,0 +1,186 @@
+// Single shared state/callback surface between the Rust view-model and all
+// views. Rust reads/writes it via `window.global::<Bridge>()`; views bind to
+// it directly, so no property forwarding through the component tree.
+
+import { Tone } from "theme/theme.slint";
+
+export enum TrackKind {
+    video,
+    audio,
+    subtitle,
+}
+
+// A media fact shown in the document header ("2160p", "DV8 HDR10", ...).
+export struct BadgeData {
+    text: string,
+    tone: Tone,
+}
+
+export struct DocTabData {
+    title: string,
+    changed: bool,
+    busy: bool,
+    progress: int,
+    failed: bool,
+    done: bool,
+}
+
+export struct TrackRowData {
+    keep: bool,
+    kind: TrackKind,
+    // 1-based position among tracks of the same kind ("Audio 2").
+    ordinal: int,
+    codec: string,
+    detail: string,
+    name: string,
+    language: string,
+    // Human-readable language ("English"); empty when unset/unknown.
+    language-name: string,
+    is-default: bool,
+    is-forced: bool,
+    is-original: bool,
+    is-hi: bool,
+    is-vi: bool,
+    is-commentary: bool,
+    can-up: bool,
+    can-down: bool,
+}
+
+export struct InfoRowData {
+    key: string,
+    value: string,
+}
+
+export struct DirRow {
+    name: string,
+    path: string,
+    is-dir: bool,
+}
+
+export global Bridge {
+    // --- platform -----------------------------------------------------
+    in property <bool> native-dialogs: true;
+
+    // --- tabs / navigation ----------------------------------------------
+    in property <[DocTabData]> tabs;
+    in property <int> active-tab: -1;
+    in property <bool> show-settings;
+    in property <bool> show-browser;
+    in property <string> error-message;
+    in property <bool> loading;
+    callback select-tab(int);
+    callback close-tab(int);
+    callback open-requested();
+    callback toggle-settings();
+    callback dismiss-error();
+
+    // --- volume browser (web) ---------------------------------------------
+    in property <[DirRow]> browse-entries;
+    in property <string> browse-path;
+    in property <string> browse-root;
+    in property <[string]> volume-roots;
+    callback browse-root-selected(string);
+    callback browse-entry-activated(string, bool);
+    callback browse-up();
+    callback browse-close();
+
+    // --- active document header -------------------------------------------
+    // Header: "Dune: Part Two (2024)", the file name and media facts.
+    in property <string> doc-title;
+    in property <string> doc-subtitle;
+    in property <[BadgeData]> doc-badges;
+    // Rows that differ from the file on disk (edited, dropped or moved).
+    in property <int> change-count;
+    in property <[string]> profile-names;
+    in-out property <int> profile-index;
+    in property <[string]> language-labels;
+    in-out property <int> language-index;
+    in property <[string]> warnings;
+    callback profile-selected(int);
+    callback language-selected(int);
+    callback apply-profile();
+    callback reset-tracks();
+    callback apply-all();
+
+    // --- tracks -------------------------------------------------------
+    in property <[TrackRowData]> tracks;
+    callback move-track(int, int);
+    callback set-keep(int, bool);
+    callback rename-track(int, string);
+    callback set-language(int, string);
+    // flag: "default" | "forced" | "original" | "hi" | "vi" | "commentary"
+    callback set-flag(int, string, bool);
+
+    // --- media info -----------------------------------------------------
+    in property <[string]> info-sections;
+    in-out property <int> info-section-index;
+    in-out property <string> info-filter;
+    in property <[InfoRowData]> info-rows;
+    callback info-section-selected(int);
+    callback info-filter-edited(string);
+
+    // --- naming ---------------------------------------------------------
+    in-out property <int> kind-index;
+    in-out property <string> meta-title;
+    in-out property <string> meta-year;
+    in-out property <string> meta-tmdb;
+    in-out property <string> meta-imdb;
+    in-out property <string> meta-tvdb;
+    in-out property <string> meta-edition;
+    in-out property <string> meta-custom-formats;
+    in-out property <string> meta-group;
+    in-out property <string> meta-season;
+    in-out property <string> meta-episodes;
+    in-out property <string> meta-episode-title;
+    in property <[string]> source-names;
+    in-out property <int> source-index;
+    in property <[string]> revision-names;
+    in-out property <int> revision-index;
+    in property <string> preview-name;
+    in property <string> preview-problem;
+    callback naming-edited();
+
+    // --- output / jobs ----------------------------------------------------
+    in-out property <string> output-name;
+    in property <bool> output-auto: true;
+    in property <bool> busy;
+    in property <int> progress;
+    in property <string> status-message;
+    in property <int> doc-count;
+    in property <bool> any-busy;
+    callback output-edited(string);
+    callback output-reset();
+    callback save();
+    callback save-all();
+    callback cancel();
+
+    // --- settings -------------------------------------------------------
+    in property <[string]> s-profile-names;
+    in-out property <int> s-profile-index;
+    in-out property <string> s-name;
+    in-out property <string> s-video-format;
+    in-out property <string> s-audio-format;
+    in-out property <string> s-audio-rules;
+    in-out property <bool> s-keep-commentary;
+    in-out property <bool> s-keep-descriptions;
+    in-out property <string> s-sub-languages;
+    in-out property <string> s-sub-format;
+    in-out property <string> s-sub-order;
+    in-out property <bool> s-default-forced;
+    in-out property <bool> s-detect-forced;
+    in-out property <string> s-movie-format;
+    in-out property <string> s-episode-format;
+    in property <[string]> s-colon-names;
+    in-out property <int> s-colon-index;
+    in-out property <string> s-custom-formats;
+    in property <string> s-errors;
+    in property <string> s-preview;
+    in property <bool> s-dirty;
+    callback s-profile-selected(int);
+    callback s-edited();
+    callback s-add-profile();
+    callback s-delete-profile();
+    callback s-save();
+    callback s-revert();
+    callback s-reset-defaults();
+}

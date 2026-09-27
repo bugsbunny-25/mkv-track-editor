@@ -1,0 +1,106 @@
+import { Theme } from "../theme/theme.slint";
+import { LabelText, CaptionText } from "typography.slint";
+
+// On/off switch. Controlled: it reports the requested state through
+// `toggled` and only changes when the owner updates `checked`, so a
+// binding like `checked: row.keep` never gets overwritten.
+export component Toggle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> accessible-name;
+    callback toggled(bool);
+
+    width: 34px;
+    height: 20px;
+    opacity: enabled ? 1 : 0.45;
+    forward-focus: focus;
+
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: checked;
+    accessible-label: accessible-name;
+    accessible-action-default => { if (root.enabled) { root.toggled(!root.checked); } }
+
+    track := Rectangle {
+        border-radius: self.height / 2;
+        background: root.checked ? Theme.accent : Theme.toggle-off;
+        animate background { duration: Theme.duration-fast; }
+
+        knob := Rectangle {
+            width: parent.height - 4px;
+            height: self.width;
+            y: 2px;
+            x: root.checked ? parent.width - self.width - 2px : 2px;
+            border-radius: self.width / 2;
+            background: Theme.toggle-knob;
+            drop-shadow-blur: 2px;
+            drop-shadow-offset-y: 1px;
+            drop-shadow-color: Theme.shadow;
+            animate x { duration: Theme.duration-medium; easing: ease-out; }
+        }
+    }
+
+    Rectangle {
+        x: -2px;
+        y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: self.height / 2;
+        border-width: focus.has-focus ? 2px : 0;
+        border-color: Theme.focus-ring;
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.toggled(!root.checked);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.toggled(!root.checked); }
+    }
+}
+
+// A labelled setting row: title and optional description on the left,
+// switch on the right. The whole row is clickable.
+export component ToggleRow {
+    in property <string> label;
+    in property <string> description;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    min-height: Theme.control-height;
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.toggled(!root.checked); }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.space-3;
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-0-5;
+            horizontal-stretch: 1;
+            LabelText { text: root.label; wrap: word-wrap; }
+            if root.description != "": CaptionText { text: root.description; wrap: word-wrap; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Toggle {
+                checked: root.checked;
+                enabled: root.enabled;
+                accessible-name: root.label;
+                toggled(value) => { root.toggled(value); }
+            }
+        }
+    }
+}

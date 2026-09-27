@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MKV Track Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }
+      /* Slint sizes the canvas to the window's preferred size via inline
+         styles; !important makes it fill the viewport instead, and winit's
+         ResizeObserver then relayouts the UI to the real size (including
+         on browser resizes). */
+      canvas { display: block; width: 100vw !important; height: 100vh !important; outline: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <script type="module">
+      import init from "./pkg/mkv_web.js";
+      init();
+    </script>
+  </body>
+</html>

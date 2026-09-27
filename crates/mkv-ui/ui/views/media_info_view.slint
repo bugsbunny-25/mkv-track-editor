@@ -1,0 +1,86 @@
+// MediaInfo's full report: sections (General, Video, Audio #1, ...) on the
+// left, a filterable key/value table on the right. A filter searches every
+// section.
+
+import { LineEdit, ListView } from "std-widgets.slint";
+import {
+    Theme, Icons, Icon, Card, Divider, NavItem, OverlineText, SecondaryText, BodyText, CaptionText,
+} from "../components/index.slint";
+import { Bridge } from "../bridge.slint";
+
+export component MediaInfoView inherits HorizontalLayout {
+    spacing: Theme.space-4;
+
+    Card {
+        width: Theme.sidebar-width;
+        VerticalLayout {
+            padding: Theme.space-2;
+            spacing: Theme.space-1;
+            HorizontalLayout {
+                padding-left: Theme.space-2 + Theme.space-0-5;
+                padding-top: Theme.space-2;
+                padding-bottom: Theme.space-1;
+                OverlineText { text: "Sections"; }
+            }
+            ListView {
+                for title[i] in Bridge.info-sections: NavItem {
+                    text: title;
+                    selected: i == Bridge.info-section-index && Bridge.info-filter == "";
+                    clicked => { Bridge.info-section-selected(i); }
+                }
+            }
+        }
+    }
+
+    Card {
+        horizontal-stretch: 1;
+        VerticalLayout {
+            HorizontalLayout {
+                padding: Theme.space-3;
+                spacing: Theme.space-3;
+                VerticalLayout {
+                    alignment: center;
+                    Icon { source: Icons.search; colorize: Theme.text-muted; }
+                }
+                LineEdit {
+                    horizontal-stretch: 1;
+                    placeholder-text: "Filter all sections: HDR, Atmos, bit rate…";
+                    text <=> Bridge.info-filter;
+                    edited(text) => { Bridge.info-filter-edited(text); }
+                }
+                CaptionText {
+                    text: Bridge.info-rows.length == 1 ? "1 field" : Bridge.info-rows.length + " fields";
+                }
+            }
+            Divider { }
+
+            if Bridge.info-rows.length == 0: VerticalLayout {
+                vertical-stretch: 1;
+                alignment: center;
+                SecondaryText {
+                    text: Bridge.info-filter != "" ? "Nothing matches “" + Bridge.info-filter + "”." : "This section is empty.";
+                    horizontal-alignment: center;
+                }
+            }
+            if Bridge.info-rows.length > 0: ListView {
+                vertical-stretch: 1;
+                for row in Bridge.info-rows: Rectangle {
+                    HorizontalLayout {
+                        padding-left: Theme.space-4;
+                        padding-right: Theme.space-4;
+                        padding-top: Theme.space-2;
+                        padding-bottom: Theme.space-2;
+                        spacing: Theme.space-4;
+                        SecondaryText { text: row.key; width: 240px; wrap: word-wrap; vertical-alignment: top; }
+                        BodyText { text: row.value; horizontal-stretch: 1; wrap: word-wrap; vertical-alignment: top; }
+                    }
+                    Divider {
+                        x: Theme.space-4;
+                        y: parent.height - self.height;
+                        width: parent.width - 2 * Theme.space-4;
+                    }
+                }
+            }
+        }
+    }
+}

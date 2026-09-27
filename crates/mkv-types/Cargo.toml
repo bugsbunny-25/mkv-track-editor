@@ -1,0 +1,17 @@
+[package]
+name = "mkv-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+# uuid's v4 feature pulls in `rand` -> `getrandom`, which needs an explicit
+# backend on wasm32-unknown-unknown (this crate is compiled for wasm too,
+# via mkv-web, even though JobId::new() is only ever called server-side).
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+uuid = { workspace = true, features = ["js"] }

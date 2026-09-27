@@ -1,0 +1,49 @@
+import { Theme } from "../theme/theme.slint";
+
+// Mutually exclusive view switcher (page tabs within a document).
+export component SegmentedControl inherits Rectangle {
+    in property <[string]> items;
+    in property <int> current-index;
+    callback selected(int);
+
+    height: Theme.control-height;
+    horizontal-stretch: 0;
+    border-radius: Theme.radius-md;
+    background: Theme.surface-muted;
+    accessible-role: tab-list;
+
+    HorizontalLayout {
+        padding: 3px;
+        spacing: Theme.space-0-5;
+
+        for item[i] in root.items: segment := Rectangle {
+            property <bool> active: i == root.current-index;
+            border-radius: Theme.radius-sm;
+            background: active ? Theme.surface : (touch.has-hover ? Theme.state-hover : transparent);
+            drop-shadow-blur: active ? 3px : 0;
+            drop-shadow-offset-y: 1px;
+            drop-shadow-color: Theme.shadow;
+            accessible-role: tab;
+            accessible-label: item;
+            accessible-item-selected: active;
+            accessible-action-default => { root.selected(i); }
+            animate background { duration: Theme.duration-fast; }
+
+            touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.selected(i); }
+            }
+            HorizontalLayout {
+                padding-left: Theme.space-3;
+                padding-right: Theme.space-3;
+                Text {
+                    text: item;
+                    font-size: Theme.font-body;
+                    font-weight: Theme.weight-medium;
+                    color: segment.active ? Theme.text-primary : Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

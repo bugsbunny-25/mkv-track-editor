@@ -1,0 +1,56 @@
+// Type scale. Use these instead of styling `Text` ad hoc so sizes, weights
+// and colours stay consistent across views.
+
+import { Theme } from "../theme/theme.slint";
+
+// Page / document title.
+export component DisplayText inherits Text {
+    font-size: Theme.font-display;
+    font-weight: Theme.weight-semibold;
+    color: Theme.text-primary;
+    overflow: elide;
+}
+
+// Card and section titles.
+export component TitleText inherits Text {
+    font-size: Theme.font-title;
+    font-weight: Theme.weight-semibold;
+    color: Theme.text-primary;
+    overflow: elide;
+}
+
+// Form labels and emphasised body copy.
+export component LabelText inherits Text {
+    font-size: Theme.font-body;
+    font-weight: Theme.weight-medium;
+    color: Theme.text-primary;
+    vertical-alignment: center;
+}
+
+export component BodyText inherits Text {
+    font-size: Theme.font-body;
+    color: Theme.text-primary;
+    vertical-alignment: center;
+}
+
+export component SecondaryText inherits Text {
+    font-size: Theme.font-body;
+    color: Theme.text-secondary;
+    vertical-alignment: center;
+}
+
+// Metadata, hints and helper copy.
+export component CaptionText inherits Text {
+    font-size: Theme.font-small;
+    color: Theme.text-muted;
+    vertical-alignment: center;
+}
+
+// Small group heading above a list of controls.
+export component OverlineText inherits Text {
+    font-size: Theme.font-caption;
+    font-weight: Theme.weight-semibold;
+    color: Theme.text-muted;
+    letter-spacing: 0.4px;
+    vertical-alignment: center;
+}

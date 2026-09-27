@@ -1,0 +1,124 @@
+import { Theme, Tone } from "../theme/theme.slint";
+import { Icon } from "icon.slint";
+
+// Visual weight. Use at most one `primary` per view.
+export enum ButtonVariant {
+    primary,
+    secondary,
+    ghost,
+    danger,
+}
+
+export enum ControlSize {
+    small,
+    medium,
+}
+
+// Button with an optional leading icon. Icon-only when `text` is empty —
+// then set `accessible-name` so screen readers can announce it.
+export component Button {
+    in property <string> text;
+    in property <image> icon;
+    in property <ButtonVariant> variant: ButtonVariant.secondary;
+    in property <ControlSize> size: ControlSize.medium;
+    in property <bool> enabled: true;
+    // Latched look, e.g. the active settings toggle or a selected filter.
+    in property <bool> selected;
+    in property <string> accessible-name: text;
+    callback clicked();
+
+    property <bool> icon-only: text == "";
+    property <bool> has-icon: icon.width > 0;
+    property <length> control-height: size == ControlSize.small ? Theme.control-height-sm : Theme.control-height;
+    property <bool> hovered: touch.has-hover && enabled;
+    property <bool> pressed: touch.pressed && enabled;
+
+    property <color> foreground: {
+        if (variant == ButtonVariant.primary) { return Theme.on-accent; }
+        if (variant == ButtonVariant.danger) { return Theme.tone-foreground(Tone.danger); }
+        if (selected) { return Theme.accent-text; }
+        if (variant == ButtonVariant.ghost && !hovered) { return Theme.text-secondary; }
+        return Theme.text-primary;
+    }
+    property <color> fill: {
+        if (variant == ButtonVariant.primary) { return pressed || hovered ? Theme.accent-hover : Theme.accent; }
+        if (selected) { return Theme.state-selected; }
+        if (pressed) { return Theme.state-pressed; }
+        if (hovered) { return variant == ButtonVariant.danger ? Theme.tone-background(Tone.danger) : Theme.state-hover; }
+        return variant == ButtonVariant.secondary ? Theme.surface : transparent;
+    }
+
+    min-width: control-height;
+    height: control-height;
+    horizontal-stretch: 0;
+    opacity: enabled ? 1 : 0.45;
+    forward-focus: focus;
+
+    accessible-role: button;
+    accessible-label: accessible-name;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    background := Rectangle {
+        border-radius: Theme.radius-md;
+        background: root.fill;
+        border-width: root.variant == ButtonVariant.secondary && !root.selected ? Theme.border-width : 0;
+        border-color: Theme.border-strong;
+        animate background { duration: Theme.duration-fast; }
+    }
+
+    focus-ring := Rectangle {
+        x: -2px;
+        y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: Theme.radius-md + 2px;
+        border-width: focus.has-focus ? 2px : 0;
+        border-color: Theme.focus-ring;
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: root.icon-only ? 0 : (root.has-icon ? Theme.space-2 + Theme.space-0-5 : Theme.space-3);
+        padding-right: root.icon-only ? 0 : Theme.space-3;
+        spacing: Theme.space-1-5;
+        alignment: center;
+
+        if root.has-icon: VerticalLayout {
+            alignment: center;
+            Icon {
+                source: root.icon;
+                size: root.size == ControlSize.small ? Theme.icon-sm : Theme.icon-md;
+                colorize: root.foreground;
+            }
+        }
+        if !root.icon-only: Text {
+            text: root.text;
+            font-size: root.size == ControlSize.small ? Theme.font-small : Theme.font-body;
+            font-weight: Theme.weight-medium;
+            color: root.foreground;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Square, icon-only ghost button (toolbar actions, row actions).
+export component IconButton inherits Button {
+    variant: ButtonVariant.ghost;
+    width: self.height;
+}

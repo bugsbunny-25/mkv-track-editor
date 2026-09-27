@@ -1,0 +1,40 @@
+import { Theme, Tone } from "../theme/theme.slint";
+
+// A themed outline icon.
+export component Icon inherits Image {
+    in property <length> size: Theme.icon-md;
+    width: size;
+    height: size;
+    colorize: Theme.text-secondary;
+    image-fit: contain;
+    accessible-role: none;
+}
+
+// An icon on a tinted rounded square — used for track types, file posters
+// and list entries.
+export component IconTile inherits Rectangle {
+    in property <image> icon;
+    in property <Tone> tone: Tone.neutral;
+    in property <length> size: Theme.tile-md;
+    in property <length> icon-size: size * 0.5;
+
+    width: size;
+    height: size;
+    border-radius: size <= Theme.tile-sm ? Theme.radius-sm : Theme.radius-md;
+    background: Theme.tone-background(tone);
+
+    Icon {
+        source: root.icon;
+        size: root.icon-size;
+        colorize: Theme.tone-foreground(root.tone);
+    }
+}
+
+// Small circular status indicator.
+export component StatusDot inherits Rectangle {
+    in property <Tone> tone: Tone.neutral;
+    width: 8px;
+    height: 8px;
+    border-radius: self.width / 2;
+    background: Theme.tone-solid(tone);
+}

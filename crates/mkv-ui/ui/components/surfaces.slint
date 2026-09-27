@@ -1,0 +1,123 @@
+import { Theme, Tone } from "../theme/theme.slint";
+import { Icons } from "../theme/icons.slint";
+import { Icon } from "icon.slint";
+import { IconButton, ControlSize } from "button.slint";
+import { BodyText, TitleText, CaptionText } from "typography.slint";
+
+// Raised container on the canvas. Lay out children with a layout inside.
+export component Card inherits Rectangle {
+    background: Theme.surface;
+    border-radius: Theme.radius-lg;
+    border-width: Theme.border-width;
+    border-color: Theme.border;
+    drop-shadow-blur: 3px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: Theme.shadow;
+}
+
+// Card with a title (and optional description) above its content.
+export component SectionCard inherits Card {
+    in property <string> title;
+    in property <string> description;
+
+    VerticalLayout {
+        padding: Theme.space-4;
+        spacing: Theme.space-3;
+        VerticalLayout {
+            spacing: Theme.space-0-5;
+            TitleText { text: root.title; }
+            if root.description != "": CaptionText { text: root.description; wrap: word-wrap; }
+        }
+        @children
+    }
+}
+
+export component Divider inherits Rectangle {
+    height: Theme.border-width;
+    background: Theme.border;
+}
+
+export component VerticalDivider inherits Rectangle {
+    width: Theme.border-width;
+    background: Theme.border;
+}
+
+// Inline message, tinted by tone.
+export component Banner inherits Rectangle {
+    in property <string> text;
+    in property <Tone> tone: Tone.neutral;
+    in property <bool> dismissable;
+    callback dismiss();
+
+    border-radius: Theme.radius-md;
+    background: Theme.tone-background(tone);
+    accessible-role: AccessibleRole.text;
+    accessible-label: text;
+
+    HorizontalLayout {
+        padding-left: Theme.space-3;
+        padding-right: root.dismissable ? Theme.space-1 : Theme.space-3;
+        padding-top: Theme.space-2;
+        padding-bottom: Theme.space-2;
+        spacing: Theme.space-2;
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                source: root.tone == Tone.danger || root.tone == Tone.warning ? Icons.alert : Icons.info;
+                colorize: Theme.tone-foreground(root.tone);
+            }
+        }
+        BodyText {
+            text: root.text;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            color: Theme.tone-foreground(root.tone);
+        }
+        if root.dismissable: VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: Icons.close;
+                size: ControlSize.small;
+                accessible-name: "Dismiss";
+                clicked => { root.dismiss(); }
+            }
+        }
+    }
+}
+
+// Determinate progress, 0.0 – 1.0.
+export component ProgressBar inherits Rectangle {
+    in property <float> value;
+    in property <Tone> tone: Tone.accent;
+
+    height: Theme.progress-height;
+    border-radius: self.height / 2;
+    background: Theme.surface-muted;
+    accessible-role: progress-indicator;
+    accessible-value: round(clamp(value, 0, 1) * 100) + "%";
+
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.value, 0, 1);
+        border-radius: parent.border-radius;
+        background: Theme.tone-solid(root.tone);
+        animate width { duration: Theme.duration-medium; }
+    }
+}
+
+// Label + control + optional hint, stacked.
+export component FormField inherits VerticalLayout {
+    in property <string> label;
+    in property <string> hint;
+    spacing: Theme.space-1-5;
+
+    Text {
+        text: root.label;
+        font-size: Theme.font-small;
+        font-weight: Theme.weight-medium;
+        color: Theme.text-secondary;
+    }
+    @children
+    if root.hint != "": CaptionText { text: root.hint; wrap: word-wrap; }
+}

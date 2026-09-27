@@ -1,0 +1,158 @@
+// One open file: header with media facts and page switcher, the active
+// page, and the output/save bar.
+
+import { LineEdit } from "std-widgets.slint";
+import {
+    Theme, Tone, Icons, IconTile, Badge, Button, ButtonVariant, ControlSize, SegmentedControl, Card, Banner,
+    ProgressBar, TitleText, CaptionText, OverlineText,
+} from "../components/index.slint";
+import { Bridge, BadgeData } from "../bridge.slint";
+import { ViewState, DocumentPage } from "view_state.slint";
+import { TracksView } from "tracks_view.slint";
+import { MediaInfoView } from "media_info_view.slint";
+import { NamingView } from "naming_view.slint";
+
+component DocumentHeader inherits Card {
+    HorizontalLayout {
+        padding: Theme.space-4;
+        spacing: Theme.space-4;
+
+        VerticalLayout {
+            alignment: center;
+            IconTile { icon: Icons.movie; tone: Tone.accent; size: Theme.tile-lg; icon-size: Theme.icon-xl; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-1;
+            horizontal-stretch: 1;
+            TitleText { text: Bridge.doc-title; font-size: Theme.font-headline; }
+            CaptionText { text: Bridge.doc-subtitle; overflow: elide; }
+            // Clipped so a long list of facts never forces the window wider.
+            Rectangle {
+                min-width: 0;
+                height: Theme.badge-height;
+                clip: true;
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Theme.space-1-5;
+                    for badge in Bridge.doc-badges: Badge { text: badge.text; tone: badge.tone; }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            SegmentedControl {
+                items: ["Tracks", "Media info", "Naming"];
+                current-index: ViewState.page == DocumentPage.tracks ? 0 : (ViewState.page == DocumentPage.media-info ? 1 : 2);
+                selected(index) => {
+                    ViewState.page = index == 0 ? DocumentPage.tracks : (index == 1 ? DocumentPage.media-info : DocumentPage.naming);
+                }
+            }
+        }
+    }
+}
+
+component OutputBar inherits Card {
+    property <bool> failed: Bridge.active-tab >= 0 && Bridge.tabs[Bridge.active-tab].failed;
+    property <bool> done: Bridge.active-tab >= 0 && Bridge.tabs[Bridge.active-tab].done;
+
+    HorizontalLayout {
+        padding: Theme.space-3;
+        padding-left: Theme.space-4;
+        spacing: Theme.space-3;
+
+        VerticalLayout {
+            alignment: center;
+            IconTile { icon: Icons.file; size: Theme.tile-md; }
+        }
+        VerticalLayout {
+            spacing: Theme.space-1;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: Theme.space-2;
+                OverlineText { text: "Output file"; }
+                if !Bridge.output-auto: Badge { text: "Custom name"; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            HorizontalLayout {
+                spacing: Theme.space-2;
+                LineEdit {
+                    horizontal-stretch: 1;
+                    text <=> Bridge.output-name;
+                    enabled: !Bridge.busy;
+                    edited(text) => { Bridge.output-edited(text); }
+                }
+                if !Bridge.output-auto: Button {
+                    text: "Use format";
+                    icon: Icons.reset;
+                    variant: ButtonVariant.ghost;
+                    clicked => { Bridge.output-reset(); }
+                }
+            }
+        }
+
+        // Job status: progress while saving, the outcome afterwards.
+        if Bridge.busy: VerticalLayout {
+            width: 200px;
+            alignment: end;
+            spacing: Theme.space-1-5;
+            padding-bottom: (Theme.control-height - Theme.progress-height) / 2;
+            CaptionText { text: Bridge.status-message; overflow: elide; }
+            ProgressBar { value: Bridge.progress / 100; }
+        }
+        if !Bridge.busy && Bridge.status-message != "": VerticalLayout {
+            max-width: 280px;
+            alignment: end;
+            spacing: Theme.space-1;
+            padding-bottom: (Theme.control-height - Theme.badge-height) / 2;
+            HorizontalLayout {
+                alignment: start;
+                Badge {
+                    text: root.failed ? "Failed" : (root.done ? "Saved" : "Status");
+                    tone: root.failed ? Tone.danger : (root.done ? Tone.success : Tone.neutral);
+                    icon: root.failed ? Icons.alert : Icons.check;
+                }
+            }
+            CaptionText { text: Bridge.status-message; overflow: elide; }
+        }
+
+        VerticalLayout {
+            alignment: end;
+            HorizontalLayout {
+                spacing: Theme.space-2;
+                if Bridge.doc-count > 1: Button {
+                    text: "Save all";
+                    icon: Icons.layers;
+                    enabled: !Bridge.any-busy;
+                    clicked => { Bridge.save-all(); }
+                }
+                if Bridge.busy: Button { text: "Cancel"; clicked => { Bridge.cancel(); } }
+                if !Bridge.busy: Button {
+                    text: Bridge.native-dialogs ? "Save as…" : "Save";
+                    icon: Icons.save;
+                    variant: ButtonVariant.primary;
+                    clicked => { Bridge.save(); }
+                }
+            }
+        }
+    }
+}
+
+export component DocumentView inherits VerticalLayout {
+    // A new file starts with its first track selected.
+    property <int> active-tab: Bridge.active-tab;
+    changed active-tab => { ViewState.selected-track = 0; }
+
+    padding: Theme.space-5;
+    spacing: Theme.space-4;
+
+    DocumentHeader { }
+
+    for warning in Bridge.warnings: Banner { text: warning; tone: Tone.warning; }
+
+    if ViewState.page == DocumentPage.tracks: TracksView { vertical-stretch: 1; }
+    if ViewState.page == DocumentPage.media-info: MediaInfoView { vertical-stretch: 1; }
+    if ViewState.page == DocumentPage.naming: NamingView { vertical-stretch: 1; }
+
+    OutputBar { }
+}
