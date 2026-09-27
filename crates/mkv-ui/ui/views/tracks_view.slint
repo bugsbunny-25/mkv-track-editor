@@ -362,15 +362,26 @@ export component TracksView inherits VerticalLayout {
     spacing: Theme.space-4;
 
     ProfileToolbar { }
-    if Viewport.lg: HorizontalLayout {
+    // One layout whose direction flips, rather than a copy of the list and
+    // inspector for each arrangement: side by side (each scrolling inside
+    // its card) from `lg` up, stacked at natural heights below it.
+    FlexboxLayout {
+        flex-direction: Viewport.lg ? FlexboxLayoutDirection.row : FlexboxLayoutDirection.column;
+        flex-wrap: no-wrap;
+        alignment: stretch;
         spacing: Theme.space-5;
-        vertical-stretch: 1;
-        TrackList { horizontal-stretch: 1; }
-        TrackInspector { width: Theme.inspector-width; featured: true; }
-    }
-    if !Viewport.lg: VerticalLayout {
-        spacing: Theme.space-5;
-        TrackList { scrolls: false; }
-        TrackInspector { scrolls: false; featured: true; }
+        vertical-stretch: Viewport.lg ? 1 : 0;
+        TrackList {
+            horizontal-stretch: 1;
+            scrolls: Viewport.lg;
+        }
+        TrackInspector {
+            // A fixed-width side panel; full width when stacked.
+            preferred-width: Theme.inspector-width;
+            min-width: Viewport.lg ? Theme.inspector-width : 0px;
+            horizontal-stretch: 0;
+            scrolls: Viewport.lg;
+            featured: true;
+        }
     }
 }

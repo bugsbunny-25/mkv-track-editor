@@ -152,15 +152,15 @@ export component TextArea {
                 edited => { root.edited(self.text); }
                 // Keep the cursor line in view.
                 cursor-position-changed(cpos) => {
-                    if (cpos.y + self.y + scroll.viewport-y < 0) {
-                        scroll.viewport-y = -cpos.y - self.y;
-                    } else if (cpos.y + self.y + self.font-size * 1.5 + scroll.viewport-y > scroll.visible-height) {
-                        scroll.viewport-y = scroll.visible-height - cpos.y - self.y - self.font-size * 1.5;
+                    if (cpos.y + self.y + scroll.content-y < 0) {
+                        scroll.content-y = -cpos.y - self.y;
+                    } else if (cpos.y + self.y + self.font-size * 1.5 + scroll.content-y > scroll.visible-height) {
+                        scroll.content-y = scroll.visible-height - cpos.y - self.y - self.font-size * 1.5;
                     }
-                    if (cpos.x + self.x + scroll.viewport-x < 0) {
-                        scroll.viewport-x = -cpos.x - self.x;
-                    } else if (cpos.x + self.x + scroll.viewport-x > scroll.visible-width - self.text-cursor-width) {
-                        scroll.viewport-x = scroll.visible-width - cpos.x - self.x - self.text-cursor-width;
+                    if (cpos.x + self.x + scroll.content-x < 0) {
+                        scroll.content-x = -cpos.x - self.x;
+                    } else if (cpos.x + self.x + scroll.content-x > scroll.visible-width - self.text-cursor-width) {
+                        scroll.content-x = scroll.visible-width - cpos.x - self.x - self.text-cursor-width;
                     }
                 }
             }
@@ -187,20 +187,47 @@ export component Select {
     }
 
     min-width: 120px;
+    // The content sits inside `dim`, so its size is passed up explicitly.
+    preferred-width: content.preferred-width;
+    max-width: content.max-width;
     height: Theme.control-height;
     horizontal-stretch: 1;
     vertical-stretch: 0;
-    opacity: enabled ? 1 : 0.45;
     forward-focus: focus;
     accessible-role: combobox;
     accessible-value: current-value;
     accessible-expanded: false;
     accessible-action-default => { if (root.enabled) { popup.show(); } }
 
-    FieldFrame {
-        focused: focus.has-focus;
-        hovered: touch.has-hover;
-        enabled: root.enabled;
+    // Dimmed here rather than on the root, where `opacity` would make Slint
+    // copy the component into every place it is used.
+    dim := Rectangle {
+        opacity: root.enabled ? 1 : 0.45;
+
+        FieldFrame {
+            focused: focus.has-focus;
+            hovered: touch.has-hover;
+            enabled: root.enabled;
+        }
+
+        content := HorizontalLayout {
+            padding-left: Theme.space-3;
+            padding-right: Theme.space-2 + Theme.space-0-5;
+            spacing: Theme.space-2;
+            Text {
+                text: root.current-value;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+                font-size: Theme.font-body;
+                font-weight: Theme.weight-medium;
+                color: Theme.text-primary;
+            }
+            VerticalLayout {
+                alignment: center;
+                Icon { source: Icons.chevron-down; size: Theme.icon-md; colorize: Theme.text-primary; }
+            }
+        }
     }
 
     focus := FocusScope {
@@ -229,25 +256,6 @@ export component Select {
         clicked => {
             focus.focus();
             popup.show();
-        }
-    }
-
-    HorizontalLayout {
-        padding-left: Theme.space-3;
-        padding-right: Theme.space-2 + Theme.space-0-5;
-        spacing: Theme.space-2;
-        Text {
-            text: root.current-value;
-            horizontal-stretch: 1;
-            overflow: elide;
-            vertical-alignment: center;
-            font-size: Theme.font-body;
-            font-weight: Theme.weight-medium;
-            color: Theme.text-primary;
-        }
-        VerticalLayout {
-            alignment: center;
-            Icon { source: Icons.chevron-down; size: Theme.icon-md; colorize: Theme.text-primary; }
         }
     }
 

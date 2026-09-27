@@ -75,87 +75,96 @@ export component Button {
     }
 
     min-width: Theme.touch-target;
+    // The content sits inside `dim`, so its size is passed up explicitly.
+    preferred-width: content.preferred-width;
+    max-width: content.max-width;
     height: Theme.touch-target;
     horizontal-stretch: 0;
-    opacity: enabled ? 1 : 0.45;
     forward-focus: focus;
 
     accessible-role: button;
     accessible-label: accessible-name;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
-    focus-ring := Rectangle {
-        x: face.x - 4px;
-        y: face.y - 4px;
-        width: face.width + 8px;
-        height: face.height + 8px;
-        border-radius: self.height / 2;
-        border-width: focus.has-focus ? 2px : 0;
-        border-color: Theme.focus-ring;
-    }
+    // Dimming lives on this wrapper rather than the root: `opacity` on a
+    // component's root makes Slint copy the whole component into every place
+    // it's used instead of sharing one compiled copy.
+    dim := Rectangle {
+        opacity: root.enabled ? 1 : 0.45;
 
-    face := Rectangle {
-        // Centred in the hit area, shifted against the shadow so the button
-        // appears to rise and sink.
-        x: root.icon-only ? (root.width - self.width) / 2 : root.lift;
-        y: (root.height - self.height) / 2 + root.lift;
-        width: root.icon-only ? root.visual-height : root.width;
-        height: root.visual-height;
-        border-radius: self.height / 2;
-        background: root.fill;
-        border-width: Theme.border-width;
-        border-color: root.outline;
-        drop-shadow-offset-x: root.pop;
-        drop-shadow-offset-y: root.pop;
-        drop-shadow-blur: 0;
-        drop-shadow-color: root.primary ? Theme.shadow-pop : transparent;
-        animate background, border-color { duration: Theme.duration-fast; }
-        animate x, y, drop-shadow-offset-x, drop-shadow-offset-y {
-            duration: Theme.duration-medium;
-            easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+        focus-ring := Rectangle {
+            x: face.x - 4px;
+            y: face.y - 4px;
+            width: face.width + 8px;
+            height: face.height + 8px;
+            border-radius: self.height / 2;
+            border-width: focus.has-focus ? 2px : 0;
+            border-color: Theme.focus-ring;
         }
-    }
 
-    // Content rides along with the face. It must stay a direct, unpositioned
-    // child so its size constraints reach the button, so the face offset is
-    // moved into the padding (the totals stay constant).
-    HorizontalLayout {
-        padding-left: (root.icon-only ? 0 : (root.has-icon && !root.bubble ? Theme.space-3 : Theme.space-4)) + root.lift;
-        padding-right: (root.icon-only ? 0 : (root.bubble ? Theme.space-1 : Theme.space-4)) - root.lift;
-        padding-top: Theme.shadow-pop-pressed + root.lift;
-        padding-bottom: Theme.shadow-pop-pressed - root.lift;
-        spacing: root.bubble ? Theme.space-2 : Theme.space-1-5;
-        alignment: center;
-
-        if root.has-icon && !root.bubble: VerticalLayout {
-            alignment: center;
-            Icon {
-                source: root.icon;
-                size: root.size == ControlSize.small ? Theme.icon-sm : Theme.icon-md;
-                colorize: root.foreground;
-                // Icon-only buttons give a little wiggle on hover.
-                transform-rotation: root.icon-only && root.hovered ? -Theme.wiggle : 0deg;
-                animate transform-rotation { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+        face := Rectangle {
+            // Centred in the hit area, shifted against the shadow so the button
+            // appears to rise and sink.
+            x: root.icon-only ? (root.width - self.width) / 2 : root.lift;
+            y: (root.height - self.height) / 2 + root.lift;
+            width: root.icon-only ? root.visual-height : root.width;
+            height: root.visual-height;
+            border-radius: self.height / 2;
+            background: root.fill;
+            border-width: Theme.border-width;
+            border-color: root.outline;
+            drop-shadow-offset-x: root.pop;
+            drop-shadow-offset-y: root.pop;
+            drop-shadow-blur: 0;
+            drop-shadow-color: root.primary ? Theme.shadow-pop : transparent;
+            animate background, border-color { duration: Theme.duration-fast; }
+            animate x, y, drop-shadow-offset-x, drop-shadow-offset-y {
+                duration: Theme.duration-medium;
+                easing: cubic-bezier(0.34, 1.56, 0.64, 1);
             }
         }
-        if !root.icon-only: Text {
-            text: root.text;
-            font-size: root.size == ControlSize.small ? Theme.font-small : Theme.font-body;
-            font-weight: Theme.weight-bold;
-            color: root.foreground;
-            vertical-alignment: center;
-        }
-        if root.bubble: VerticalLayout {
+
+        // Content rides along with the face. It stays unpositioned (its size is
+        // passed up to the button above), so the face offset is moved into the
+        // padding (the totals stay constant).
+        content := HorizontalLayout {
+            padding-left: (root.icon-only ? 0 : (root.has-icon && !root.bubble ? Theme.space-3 : Theme.space-4)) + root.lift;
+            padding-right: (root.icon-only ? 0 : (root.bubble ? Theme.space-1 : Theme.space-4)) - root.lift;
+            padding-top: Theme.shadow-pop-pressed + root.lift;
+            padding-bottom: Theme.shadow-pop-pressed - root.lift;
+            spacing: root.bubble ? Theme.space-2 : Theme.space-1-5;
             alignment: center;
-            Rectangle {
-                width: root.visual-height - 2 * Theme.space-1 - 2 * Theme.border-width;
-                height: self.width;
-                border-radius: self.width / 2;
-                background: Theme.on-accent;
+
+            if root.has-icon && !root.bubble: VerticalLayout {
+                alignment: center;
                 Icon {
                     source: root.icon;
-                    size: Theme.icon-sm;
-                    colorize: Theme.accent;
+                    size: root.size == ControlSize.small ? Theme.icon-sm : Theme.icon-md;
+                    colorize: root.foreground;
+                    // Icon-only buttons give a little wiggle on hover.
+                    transform-rotation: root.icon-only && root.hovered ? -Theme.wiggle : 0deg;
+                    animate transform-rotation { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+                }
+            }
+            if !root.icon-only: Text {
+                text: root.text;
+                font-size: root.size == ControlSize.small ? Theme.font-small : Theme.font-body;
+                font-weight: Theme.weight-bold;
+                color: root.foreground;
+                vertical-alignment: center;
+            }
+            if root.bubble: VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: root.visual-height - 2 * Theme.space-1 - 2 * Theme.border-width;
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    background: Theme.on-accent;
+                    Icon {
+                        source: root.icon;
+                        size: Theme.icon-sm;
+                        colorize: Theme.accent;
+                    }
                 }
             }
         }

@@ -14,7 +14,6 @@ export component Toggle {
     // 44 × 24 switch centred in a full touch target.
     width: Theme.touch-target;
     height: Theme.touch-target;
-    opacity: enabled ? 1 : 0.45;
     forward-focus: focus;
 
     accessible-role: checkbox;
@@ -23,36 +22,42 @@ export component Toggle {
     accessible-label: accessible-name;
     accessible-action-default => { if (root.enabled) { root.toggled(!root.checked); } }
 
-    track := Rectangle {
-        width: 44px;
-        height: 24px;
-        border-radius: self.height / 2;
-        border-width: Theme.border-width;
-        border-color: Theme.ink;
-        background: root.checked ? Theme.toggle-on : Theme.toggle-off;
-        animate background { duration: Theme.duration-fast; }
+    // Dimmed here rather than on the root, where `opacity` would make Slint
+    // copy the component into every place it is used.
+    Rectangle {
+        opacity: root.enabled ? 1 : 0.45;
 
-        knob := Rectangle {
-            width: parent.height - 8px;
-            height: self.width;
-            y: 4px;
-            x: root.checked ? parent.width - self.width - 4px : 4px;
-            border-radius: self.width / 2;
+        track := Rectangle {
+            width: 44px;
+            height: 24px;
+            border-radius: self.height / 2;
             border-width: Theme.border-width;
             border-color: Theme.ink;
-            background: Theme.toggle-knob;
-            animate x { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
-        }
-    }
+            background: root.checked ? Theme.toggle-on : Theme.toggle-off;
+            animate background { duration: Theme.duration-fast; }
 
-    Rectangle {
-        x: track.x - 4px;
-        y: track.y - 4px;
-        width: track.width + 8px;
-        height: track.height + 8px;
-        border-radius: self.height / 2;
-        border-width: focus.has-focus ? 2px : 0;
-        border-color: Theme.focus-ring;
+            knob := Rectangle {
+                width: parent.height - 8px;
+                height: self.width;
+                y: 4px;
+                x: root.checked ? parent.width - self.width - 4px : 4px;
+                border-radius: self.width / 2;
+                border-width: Theme.border-width;
+                border-color: Theme.ink;
+                background: Theme.toggle-knob;
+                animate x { duration: Theme.duration-medium; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+            }
+        }
+
+        Rectangle {
+            x: track.x - 4px;
+            y: track.y - 4px;
+            width: track.width + 8px;
+            height: track.height + 8px;
+            border-radius: self.height / 2;
+            border-width: focus.has-focus ? 2px : 0;
+            border-color: Theme.focus-ring;
+        }
     }
 
     focus := FocusScope {

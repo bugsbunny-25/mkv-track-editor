@@ -10,7 +10,20 @@ crate-type = ["rlib"]
 [dependencies]
 mkv-types.workspace = true
 mkv-profiles.workspace = true
-slint = "1"
+# Only the core API: the binaries that link this crate pick the windowing
+# backend and renderer, so it isn't compiled with Slint's defaults (software
+# renderer, system tray, ...) that neither of them uses.
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2"] }
 
 [build-dependencies]
-slint-build = "1"
+# Without the default `renderer-software` feature, which only embeds
+# pre-rendered textures for MCU builds and pulls in image decoders.
+slint-build = { version = "1.18", default-features = false, features = ["compat-1-18"] }
+
+# Natively, the embedded icons are decoded by Slint's image decoders, which
+# only its winit backend / FemtoVG renderer enable (the desktop app's own
+# choice, so this adds nothing there); without them `cargo test -p mkv-ui`
+# wouldn't build on its own. On wasm the browser decodes images.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["backend-winit", "renderer-femtovg"] }
+

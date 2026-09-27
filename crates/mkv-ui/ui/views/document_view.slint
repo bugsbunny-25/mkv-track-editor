@@ -44,7 +44,7 @@ component DocTitle inherits VerticalLayout {
     facts := Flickable {
         min-width: 0;
         height: Theme.badge-height;
-        viewport-width: max(self.width, facts-row.preferred-width);
+        content-width: max(self.width, facts-row.preferred-width);
         facts-row := HorizontalLayout {
             alignment: start;
             spacing: Theme.space-1-5;
@@ -250,7 +250,7 @@ export component DocumentView inherits Rectangle {
     if !Viewport.lg: page := ScrollView {
         // Pinned to the top and as tall as its content needs: with wrapped
         // text the minimum can exceed the preferred height.
-        viewport-height: body.height;
+        content-height: body.height;
         body := DocumentBody {
             y: 0;
             width: page.visible-width;

@@ -234,13 +234,17 @@ export component SettingsView inherits VerticalLayout {
 
         form := ScrollView {
             horizontal-stretch: 3;
-            SettingsForm {
+            // The padding sits on this wrapper, not on SettingsForm: padding
+            // set where a layout component is used makes Slint copy the whole
+            // component into that spot instead of sharing it.
+            VerticalLayout {
                 // Without this the content takes its preferred width and
                 // scrolls horizontally instead of wrapping.
                 width: form.visible-width;
                 // Clear the scrollbar and the cards' hard shadows.
                 padding-right: Theme.space-3 + Theme.shadow-card-offset;
                 padding-bottom: Theme.shadow-card-offset;
+                SettingsForm { }
             }
         }
 
@@ -255,7 +259,7 @@ export component SettingsView inherits VerticalLayout {
 
     if !Viewport.lg: page := ScrollView {
         vertical-stretch: 1;
-        viewport-height: column.height;
+        content-height: column.height;
         column := VerticalLayout {
             y: 0;
             width: page.visible-width;
