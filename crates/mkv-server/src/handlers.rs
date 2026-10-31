@@ -8,11 +8,12 @@ use futures_util::stream::{self, Stream, StreamExt};
 use mkv_core::config_store;
 use mkv_profiles::AppConfig;
 use mkv_types::{
-    ApiError, AttachmentInfo, DirListing, FileAnalysis, JobId, JobPhase, JobProgress, ProbeResult, RemuxPlan, RootInfo,
-    TrackEdit,
+    ApiError, AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobPhase, JobProgress, MuxInput, MuxPlan,
+    MuxTrack, RemuxPlan, RootInfo, TrackEdit,
 };
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::future::Future;
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 
@@ -40,6 +41,39 @@ pub async fn browse(
         path: q.path,
         entries,
     }))
+}
+
+/// Permanently deletes one Matroska file from a root. Only `.mkv` files can
+/// be deleted, so a client can't remove anything else the roots contain.
+pub async fn delete_file(
+    State(state): State<AppState>,
+    Path(root_id): Path<String>,
+    Query(q): Query<BrowseQuery>,
+) -> Result<(), AppError> {
+    let file_name = q.path.rsplit('/').next().unwrap_or_default().to_string();
+    if !file_name.to_ascii_lowercase().ends_with(".mkv") {
+        return Err(AppError::bad_request("only .mkv files can be deleted"));
+    }
+    let volumes = state.volumes.clone();
+    let path = q.path.clone();
+    let result = tokio::task::spawn_blocking(move || volumes.remove_file(&root_id, &path))
+        .await
+        .map_err(|_| AppError::internal("background task panicked"))?;
+    match result {
+        Ok(removed) => {
+            tracing::info!(path = %removed.display(), "file deleted");
+            Ok(())
+        }
+        // Without the server-side path, which the client never sees.
+        Err(mkv_volume::VolumeError::Io { source, .. }) => {
+            let message = format!("could not delete {file_name}: {source}");
+            Err(match source.kind() {
+                std::io::ErrorKind::NotFound => AppError::not_found(message),
+                _ => AppError::internal(message),
+            })
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[derive(Deserialize)]
@@ -115,20 +149,77 @@ pub async fn submit_job(
 
     let job_id = JobId::new();
     let entry = state.jobs.create(job_id.clone());
-
     let runner = state.runner.clone();
-    let entry_for_task = entry.clone();
-    tokio::spawn(run_job(runner, original, plan, entry_for_task));
+    let sink = progress_sink(&entry);
+    tokio::spawn(run_job(entry, async move {
+        mkv_core::execute_plan(runner.as_ref(), &original, &plan, sink).await
+    }));
 
     Ok(Json(SubmitJobResponse { job_id }))
 }
 
-async fn run_job(
-    runner: Arc<mkv_core::TokioProcessRunner>,
-    original: ProbeResult,
-    plan: RemuxPlan,
-    entry: Arc<JobEntry>,
-) {
+#[derive(Deserialize)]
+pub struct MuxInputRequest {
+    root_id: String,
+    path: String,
+    #[serde(default)]
+    remove_attachments: Vec<AttachmentInfo>,
+}
+
+#[derive(Deserialize)]
+pub struct SubmitMuxRequest {
+    inputs: Vec<MuxInputRequest>,
+    output_path: String,
+    tracks: Vec<MuxTrack>,
+}
+
+/// Combines several library files into one new file in the output root.
+/// Progress is watched like any other job.
+pub async fn submit_mux(
+    State(state): State<AppState>,
+    Json(req): Json<SubmitMuxRequest>,
+) -> Result<Json<SubmitJobResponse>, AppError> {
+    let mut inputs = Vec::with_capacity(req.inputs.len());
+    let mut originals = Vec::with_capacity(req.inputs.len());
+    for input in req.inputs {
+        let path = resolve_source(&state, &input.root_id, &input.path).await?;
+        originals.push(mkv_core::probe(state.runner.as_ref(), &path).await?);
+        inputs.push(MuxInput {
+            source_path: path.to_string_lossy().into_owned(),
+            remove_attachments: input.remove_attachments,
+        });
+    }
+
+    let volumes = state.volumes.clone();
+    let output_rel = req.output_path.clone();
+    let output_path = spawn_blocking_flatten(move || volumes.resolve_output(&output_rel)).await?;
+
+    let plan = MuxPlan {
+        inputs,
+        output_path: output_path.to_string_lossy().into_owned(),
+        tracks: req.tracks,
+    };
+    mkv_core::mux::validate(&originals, &plan)?;
+
+    let job_id = JobId::new();
+    let entry = state.jobs.create(job_id.clone());
+    let runner = state.runner.clone();
+    let sink = progress_sink(&entry);
+    tokio::spawn(run_job(entry, async move {
+        mkv_core::execute_mux(runner.as_ref(), &originals, &plan, sink).await
+    }));
+
+    Ok(Json(SubmitJobResponse { job_id }))
+}
+
+fn progress_sink(entry: &Arc<JobEntry>) -> Box<dyn Fn(JobProgress) + Send + Sync> {
+    let entry = entry.clone();
+    Box::new(move |p: JobProgress| entry.publish(p))
+}
+
+/// Runs a job's work, publishing its outcome; cancelling the job drops the
+/// work, which kills the tool process.
+async fn run_job(entry: Arc<JobEntry>, work: impl Future<Output = Result<JobOutcome, mkv_core::CoreError>>) {
     entry.publish(JobProgress {
         phase: JobPhase::Running,
         percent: 0,
@@ -136,15 +227,8 @@ async fn run_job(
         output_path: None,
     });
 
-    let sink: Box<dyn Fn(JobProgress) + Send + Sync> = {
-        let entry = entry.clone();
-        Box::new(move |p: JobProgress| entry.publish(p))
-    };
-
     let outcome = tokio::select! {
-        r = mkv_core::execute_plan(runner.as_ref(), &original, &plan, sink) => {
-            r.map_err(|e| ApiError::new("remux_failed", e.to_string()))
-        }
+        r = work => r.map_err(|e| ApiError::new("remux_failed", e.to_string())),
         _ = entry.cancel.cancelled() => Err(ApiError::new("cancelled", "job was cancelled")),
     };
 

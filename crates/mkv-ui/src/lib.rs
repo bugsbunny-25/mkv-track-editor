@@ -6,6 +6,7 @@
 pub mod backend;
 pub mod document;
 pub mod file_types;
+pub mod mux;
 pub mod settings;
 mod view_model;
 

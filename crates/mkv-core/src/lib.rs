@@ -1,6 +1,7 @@
 pub mod config_store;
 pub mod error;
 pub mod mediainfo;
+pub mod mux;
 pub mod plan;
 pub mod probe;
 pub mod process;
@@ -15,7 +16,7 @@ pub use process::{
 };
 pub use probe::probe;
 
-use mkv_types::{JobOutcome, JobPhase, JobProgress, ProbeResult, RemuxPlan};
+use mkv_types::{JobOutcome, JobPhase, JobProgress, MuxPlan, ProbeResult, RemuxPlan};
 use tokio::process::Command;
 
 /// First MediaInfo release that reads HDR10+ (SMPTE ST 2094 App 4) from
@@ -131,6 +132,35 @@ pub async fn execute_plan(
     })
 }
 
+/// Like [`execute_plan`] for several source files combined into one new
+/// output. `originals` are the inputs' current probe results, in input order.
+pub async fn execute_mux(
+    runner: &dyn ProcessRunner,
+    originals: &[ProbeResult],
+    plan: &MuxPlan,
+    on_progress: Box<dyn Fn(JobProgress) + Send + Sync + 'static>,
+) -> Result<JobOutcome, CoreError> {
+    mux::validate(originals, plan)?;
+    // mkvmerge reads every input while writing the output.
+    if plan.inputs.iter().any(|input| same_file(&input.source_path, &plan.output_path)) {
+        return Err(CoreError::InvalidPlan(
+            "the muxed file can't replace one of its sources; choose a different name or folder".into(),
+        ));
+    }
+
+    let on_progress = std::sync::Arc::new(on_progress);
+    on_progress(JobProgress { phase: JobPhase::Running, percent: 0, message: None, output_path: None });
+    tracing::info!(inputs = plan.inputs.len(), output = %plan.output_path, "running mkvmerge mux");
+    let sink: ProgressSink = Box::new(move |pct: u8| {
+        on_progress(JobProgress { phase: JobPhase::Running, percent: pct, message: None, output_path: None });
+    });
+    mux::run(runner, plan, sink).await?;
+
+    Ok(JobOutcome {
+        output_path: plan.output_path.clone(),
+    })
+}
+
 /// Compares canonicalized paths when both exist (catches `./a.mkv` vs
 /// `/dir/a.mkv`, symlinks), falling back to a plain string comparison.
 fn same_file(a: &str, b: &str) -> bool {
@@ -182,6 +212,39 @@ mod tests {
         // Metadata-only onto the same path → in-place mkvpropedit is fine.
         let plan = RemuxPlan { kept_track_order: vec![0, 1], edits: vec![edit(0), edit(1)], ..plan };
         execute_plan(&runner, &original, &plan, Box::new(|_| {})).await.unwrap();
+        assert_eq!(runner.calls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn mux_refuses_to_overwrite_a_source() {
+        use mkv_types::{MuxInput, MuxTrack};
+        let track = TrackInfo {
+            id: 0,
+            uid: 10,
+            track_type: TrackType::Video,
+            codec: "HEVC".into(),
+            language: None,
+            name: None,
+            flags: TrackFlags::default(),
+        };
+        let original = ProbeResult { container: ContainerInfo::default(), tracks: vec![track], attachments: vec![] };
+        let edit = TrackEdit { id: 0, uid: 10, track_type: TrackType::Video, name: None, language: None, flags: TrackFlags::default() };
+        let plan = MuxPlan {
+            inputs: vec![
+                MuxInput { source_path: "/lib/a.mkv".into(), remove_attachments: vec![] },
+                MuxInput { source_path: "/lib/b.mkv".into(), remove_attachments: vec![] },
+            ],
+            output_path: "/lib/b.mkv".into(),
+            tracks: vec![MuxTrack { input: 0, edit: edit.clone() }, MuxTrack { input: 1, edit }],
+        };
+        let runner = MockProcessRunner::default();
+        let originals = [original.clone(), original];
+        let err = execute_mux(&runner, &originals, &plan, Box::new(|_| {})).await.unwrap_err();
+        assert!(err.to_string().contains("can't replace one of its sources"), "{err}");
+        assert!(runner.calls.lock().unwrap().is_empty());
+
+        let plan = MuxPlan { output_path: "/out/muxed.mkv".into(), ..plan };
+        execute_mux(&runner, &originals, &plan, Box::new(|_| {})).await.unwrap();
         assert_eq!(runner.calls.lock().unwrap().len(), 1);
     }
 

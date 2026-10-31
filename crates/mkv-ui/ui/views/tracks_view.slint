@@ -98,7 +98,7 @@ component TrackRow inherits Rectangle {
     callback select();
 
     property <bool> show-actions: touch.has-hover || selected;
-    property <string> summary: track.codec
+    property <string> summary: (track.source != "" ? track.source + "  ·  " : "") + track.codec
         + (track.detail != "" ? "  ·  " + track.detail : "")
         + (track.language-name != "" ? "  ·  " + track.language-name : "");
 

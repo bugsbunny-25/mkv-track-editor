@@ -34,6 +34,17 @@ fallback, HDR10+, HLG, Atmos, DTS:X, channel layouts, subtitle event counts).
   (e.g. ffmpeg's one-frame MJPEG) is proposed for removal, and image
   attachments (`cover.jpg`, …) are dropped on save. Font attachments, which
   styled subtitles need, are kept.
+- **Mux** — combine tracks from several files into one, e.g. the video of one release
+  with the audio of another ("Mux" in the app bar on desktop; tick files
+  in the library on the web). The tracks of all files are listed together,
+  each labelled with its file, and the profile picks the audio and subtitles
+  as usual. The video comes from the file of the default audio track the
+  profile picks; choose another file under **Video from** (or keep a video
+  track by hand) to override that. Chapters and the title come from the
+  video's file. Optionally **delete the source files** once the muxed file
+  is saved; files none of whose tracks are kept are left alone.
+- **Library (web)** — browse the mounted libraries, open a file in a tab,
+  tick files to mux them, or delete files (after a confirmation).
 - **Media Info** — MediaInfo's full report by section, with a filter that
   searches every section.
 - **Naming** — title/year/TMDb ID/edition/source/group/season/episode,
@@ -278,12 +289,14 @@ Compose, replace the `build:` block in `docker-compose.yml` with
 
 ```bash
 cd docker
-mkdir -p library output config   # put source .mkv files in ./library (mounted read-only)
+mkdir -p library output config   # put source .mkv files in ./library
 docker compose up --build
 ```
 
 Open `http://localhost:8080`. Edited files go to `docker/output/`; settings
-to `docker/config/config.toml`. The container runs as an unprivileged user —
+to `docker/config/config.toml`. The library is mounted writable so files can
+be deleted from the web UI; mount it with `:ro` to rule that out (deleting
+then fails with an error). The container runs as an unprivileged user —
 if it can't write to `output/` or `config/`, uncomment `user: "UID:GID"` in
 `docker-compose.yml` with your own IDs. Build context is the repository root
 (`docker build -f docker/Dockerfile .`); Compose handles that.
@@ -325,8 +338,10 @@ architecture natively.
 | GET | `/api/volumes` | Configured library roots |
 | GET | `/api/browse/{root}?path=` | Directory listing |
 | POST | `/api/analyze` | `{root_id, path}` → mkvmerge probe + MediaInfo analysis + report sections |
+| DELETE | `/api/files/{root}?path=` | Permanently delete one `.mkv` file |
 | GET / PUT | `/api/config` | Profiles + naming (validated before saving) |
 | POST | `/api/jobs` | Submit a remux/edit; output name is resolved inside the output root |
+| POST | `/api/mux` | Submit a mux of several files (`inputs`, `tracks`, `output_path`) into the output root |
 | GET | `/api/jobs/{id}/events` | SSE progress stream |
 | POST | `/api/jobs/{id}/cancel` | Cancel (kills the tool process) |
 

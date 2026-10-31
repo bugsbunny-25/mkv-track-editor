@@ -48,7 +48,8 @@ impl From<mkv_volume::VolumeError> for AppError {
             VolumeError::UnknownRoot(_)
             | VolumeError::PathEscape
             | VolumeError::AbsolutePath
-            | VolumeError::InvalidComponent => AppError::bad_request(e.to_string()),
+            | VolumeError::InvalidComponent
+            | VolumeError::NotAFile => AppError::bad_request(e.to_string()),
             VolumeError::Io { .. } => AppError::not_found(e.to_string()),
             VolumeError::InvalidConfig(_) => AppError::internal(e.to_string()),
         }

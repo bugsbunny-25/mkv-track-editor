@@ -14,7 +14,8 @@ import { ViewState, TrackStyle } from "view_state.slint";
 component InspectorBody inherits VerticalLayout {
     property <int> index: ViewState.selected-track;
     property <TrackRowData> track: Bridge.tracks[index];
-    property <string> summary: track.codec + (track.detail != "" ? "  ·  " + track.detail : "");
+    property <string> summary: (track.source != "" ? track.source + "  ·  " : "") + track.codec
+        + (track.detail != "" ? "  ·  " + track.detail : "");
 
     // The text fields are uncontrolled while focused (so typing isn't
     // interrupted by the round-trip through Rust) and re-synced otherwise.

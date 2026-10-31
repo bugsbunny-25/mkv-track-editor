@@ -6,7 +6,8 @@
 use gloo_net::http::{Request, Response};
 use mkv_profiles::AppConfig;
 use mkv_types::{
-    AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobPhase, JobProgress, RootInfo, TrackEdit,
+    AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobPhase, JobProgress, MuxTrack, RootInfo,
+    TrackEdit,
 };
 use mkv_ui::{Backend, BackendCapabilities, ProgressCallback, SourceRef, UiCallback, UiError};
 use serde::de::DeserializeOwned;
@@ -127,6 +128,22 @@ impl Backend for WebBackend {
         }
     }
 
+    fn delete_file(&self, source: SourceRef, cb: UiCallback<()>) {
+        let SourceRef::ServerPath { root_id, path } = source else {
+            cb(Err(UiError::new("invalid source for web backend")));
+            return;
+        };
+        spawn_and_deliver(cb, async move {
+            let url = format!("/api/files/{root_id}");
+            let response = Request::delete(&url).query([("path", path.as_str())]).send().await.map_err(to_ui_error)?;
+            if response.ok() {
+                Ok(())
+            } else {
+                Err(error_from(response).await)
+            }
+        });
+    }
+
     fn load_config(&self, cb: UiCallback<AppConfig>) {
         spawn_and_deliver(cb, async { get_json("/api/config").await });
     }
@@ -183,6 +200,49 @@ impl Backend for WebBackend {
                 remove_attachments,
             };
             let resp: Resp = post_json("/api/jobs", &body).await?;
+            Ok(resp.job_id)
+        });
+    }
+
+    fn submit_mux(
+        &self,
+        inputs: Vec<(SourceRef, Vec<AttachmentInfo>)>,
+        output: SourceRef,
+        tracks: Vec<MuxTrack>,
+        cb: UiCallback<JobId>,
+    ) {
+        #[derive(Serialize)]
+        struct Input {
+            root_id: String,
+            path: String,
+            remove_attachments: Vec<AttachmentInfo>,
+        }
+        #[derive(Serialize)]
+        struct Req {
+            inputs: Vec<Input>,
+            output_path: String,
+            tracks: Vec<MuxTrack>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            job_id: JobId,
+        }
+
+        let SourceRef::ServerPath { path: output_path, .. } = output else {
+            cb(Err(UiError::new("invalid output for web backend")));
+            return;
+        };
+        let mut req_inputs = Vec::with_capacity(inputs.len());
+        for (source, remove_attachments) in inputs {
+            let SourceRef::ServerPath { root_id, path } = source else {
+                cb(Err(UiError::new("invalid source for web backend")));
+                return;
+            };
+            req_inputs.push(Input { root_id, path, remove_attachments });
+        }
+        spawn_and_deliver(cb, async move {
+            let body = Req { inputs: req_inputs, output_path, tracks };
+            let resp: Resp = post_json("/api/mux", &body).await?;
             Ok(resp.job_id)
         });
     }

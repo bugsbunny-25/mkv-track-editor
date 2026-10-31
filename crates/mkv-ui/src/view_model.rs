@@ -11,10 +11,11 @@ use crate::backend::{Backend, ProgressCallback, SourceRef, UiCallback};
 use crate::document::{Document, FactKind, Flag, JobState};
 use crate::settings::{self, NamingForm, ProfileForm, COLON_OPTIONS};
 use crate::file_types::{self, FileKind};
+use crate::mux::Mux;
 use crate::{AppWindow, BadgeData, Bridge, DirRow, DocTabData, DropState, InfoRowData, Tone, TrackKind, TrackRowData};
 use mkv_profiles::labels::{audio_attrs, video_attrs};
 use mkv_profiles::{lang, AppConfig, MediaKind, QualitySource, Revision};
-use mkv_types::{FileAnalysis, JobOutcome, JobProgress, TrackType};
+use mkv_types::{AttachmentInfo, FileAnalysis, JobId, JobOutcome, JobProgress, MuxTrack, TrackEdit, TrackType};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -40,6 +41,10 @@ struct State {
     loading: usize,
     browse_root: String,
     browse_path: String,
+    /// Library files ticked in the browser (web), across folders.
+    browse_selected: Vec<SourceRef>,
+    /// Files waiting for the user to confirm their deletion.
+    pending_delete: Vec<SourceRef>,
     /// Codes behind the language ComboBox as last shown ("" = not set).
     language_codes: Vec<String>,
     settings: SettingsState,
@@ -69,6 +74,27 @@ impl State {
 
     fn doc_index(&self, id: u64) -> Option<usize> {
         self.docs.iter().position(|d| d.id == id)
+    }
+
+    /// Closes tab `i`, keeping a sensible tab active.
+    fn remove_doc(&mut self, i: usize) {
+        self.docs.remove(i);
+        self.active = match self.active {
+            _ if self.docs.is_empty() => None,
+            Some(a) if a > i => Some(a - 1),
+            Some(a) => Some(a.min(self.docs.len() - 1)),
+            None => None,
+        };
+        if self.docs.is_empty() && !self.native {
+            self.show_browser = true;
+        }
+    }
+
+    /// A file that's being saved (or queued to be) by a tab other than `except`.
+    fn busy_reading(&self, source: &SourceRef, except: Option<u64>) -> bool {
+        self.docs
+            .iter()
+            .any(|d| Some(d.id) != except && d.job.is_busy() && d.sources().contains(&source))
     }
 }
 
@@ -223,6 +249,8 @@ fn new_app(backend: Arc<dyn Backend>) -> Result<App, slint::PlatformError> {
         loading: 0,
         browse_root: String::new(),
         browse_path: String::new(),
+        browse_selected: Vec::new(),
+        pending_delete: Vec::new(),
         language_codes: Vec::new(),
         save_queue: VecDeque::new(),
         error: String::new(),
@@ -317,7 +345,11 @@ fn sync_drop(b: &Bridge, st: &State) {
 /// every nav sync — the facts follow which tracks are kept.
 fn sync_header(b: &Bridge, doc: &Document) {
     b.set_doc_title(doc.display_title().into());
-    b.set_doc_subtitle(doc.source.display().into());
+    let subtitle = match &doc.mux {
+        Some(m) => format!("Muxing {} files into one", m.sources.len()),
+        None => doc.source.display(),
+    };
+    b.set_doc_subtitle(subtitle.into());
     let badges: Vec<BadgeData> = doc
         .header_facts()
         .into_iter()
@@ -344,6 +376,7 @@ fn sync_doc(b: &Bridge, st: &mut State) {
     let Some(doc) = st.active_doc().cloned() else {
         b.set_tracks(ModelRc::default());
         b.set_warnings(ModelRc::default());
+        b.set_doc_mux(false);
         return;
     };
 
@@ -379,6 +412,31 @@ fn sync_doc(b: &Bridge, st: &mut State) {
     sync_naming_form(b, &doc);
     sync_output(b, &doc, &st.config, true);
     sync_job(b, &doc);
+    sync_mux(b, &doc);
+}
+
+/// The mux panel: the files, where the video comes from, and whether the
+/// sources are deleted after saving.
+fn sync_mux(b: &Bridge, doc: &Document) {
+    let Some(mux) = &doc.mux else {
+        b.set_doc_mux(false);
+        return;
+    };
+    let names: Vec<String> = mux
+        .sources
+        .iter()
+        .enumerate()
+        .map(|(i, s)| format!("{} · {}", Mux::label(i), s.file_name()))
+        .collect();
+    let auto = match (mux.video_from, doc.video_input()) {
+        (None, Some(input)) => format!("Auto: follows the default audio ({})", Mux::label(input)),
+        _ => "Auto: follows the default audio".to_string(),
+    };
+    b.set_doc_mux(true);
+    b.set_mux_video_options(strings(std::iter::once(auto).chain(names.iter().cloned())));
+    b.set_mux_video_index(mux.video_from.map(|i| i as i32 + 1).unwrap_or(0));
+    b.set_mux_sources(strings(names));
+    b.set_mux_delete_sources(mux.delete_sources);
 }
 
 fn sync_warnings(b: &Bridge, doc: &Document) {
@@ -445,6 +503,7 @@ fn track_row(doc: &Document, i: usize) -> TrackRowData {
     TrackRowData {
         keep: row.keep,
         kind,
+        source: doc.input_of(i).map(Mux::label).unwrap_or_default().into(),
         ordinal: ordinal as i32,
         language_name: language_name.into(),
         codec: codec.into(),
@@ -579,7 +638,9 @@ fn sync_job(b: &Bridge, doc: &Document) {
         JobState::Idle => (false, 0, String::new()),
         JobState::Queued => (true, 0, "Queued…".to_string()),
         JobState::Running { percent, .. } => (true, *percent as i32, format!("Saving… {percent}%")),
-        JobState::Done { output } => (false, 100, format!("Saved to {output}")),
+        JobState::Done { output, note } if note.is_empty() => (false, 100, format!("Saved to {output}")),
+        // The note first: a long output path is elided.
+        JobState::Done { output, note } => (false, 100, format!("{note} · saved to {output}")),
         JobState::Failed { message } => (false, 0, format!("Save failed: {message}")),
     };
     b.set_busy(busy);
@@ -628,7 +689,7 @@ fn show_error(ctx: &Ctx, message: String) {
 
 fn open_source(ctx: &Ctx, source: SourceRef) {
     let already_open = ctx.with(|b, st| {
-        if let Some(i) = st.docs.iter().position(|d| d.source == source) {
+        if let Some(i) = st.docs.iter().position(|d| d.mux.is_none() && d.source == source) {
             st.active = Some(i);
             st.show_browser = false;
             st.show_settings = false;
@@ -665,6 +726,48 @@ fn open_source(ctx: &Ctx, source: SourceRef) {
     }));
 }
 
+/// Analyzes `sources` and opens them as one mux tab once all are done.
+/// If any can't be analyzed, nothing opens.
+fn open_mux(ctx: &Ctx, sources: Vec<SourceRef>) {
+    let n = sources.len();
+    ctx.with(|b, st| {
+        st.loading += n;
+        sync_nav(b, st);
+    });
+    type Results = Vec<Option<Result<FileAnalysis, String>>>;
+    let results: Arc<Mutex<Results>> = Arc::new(Mutex::new(vec![None; n]));
+    for (i, source) in sources.iter().cloned().enumerate() {
+        let c = ctx.clone();
+        let results = results.clone();
+        let sources = sources.clone();
+        ctx.backend.analyze(source.clone(), Box::new(move |result| {
+            let all = {
+                let mut results = results.lock().unwrap();
+                results[i] = Some(result.map_err(|e| format!("Could not open {}: {}", source.file_name(), e.message)));
+                results.iter().all(Option::is_some).then(|| std::mem::take(&mut *results))
+            };
+            c.with(|b, st| {
+                st.loading = st.loading.saturating_sub(1);
+                if let Some(all) = all {
+                    match all.into_iter().flatten().collect::<Result<Vec<_>, _>>() {
+                        Ok(analyses) => {
+                            let id = st.next_id;
+                            st.next_id += 1;
+                            let doc = Document::open_mux(id, sources, analyses, &st.config);
+                            st.docs.push(doc);
+                            st.active = Some(st.docs.len() - 1);
+                            st.show_browser = false;
+                            st.show_settings = false;
+                        }
+                        Err(message) => st.error = message,
+                    }
+                }
+                sync_all(b, st);
+            });
+        }));
+    }
+}
+
 fn wire_navigation(window: &AppWindow, ctx: &Ctx) {
     let b = window.global::<Bridge>();
 
@@ -687,16 +790,7 @@ fn wire_navigation(window: &AppWindow, ctx: &Ctx) {
             if st.docs.get(i).is_none_or(|d| d.job.is_busy()) {
                 return;
             }
-            st.docs.remove(i);
-            st.active = match st.active {
-                _ if st.docs.is_empty() => None,
-                Some(a) if a > i => Some(a - 1),
-                Some(a) => Some(a.min(st.docs.len() - 1)),
-                None => None,
-            };
-            if st.docs.is_empty() && !st.native {
-                st.show_browser = true;
-            }
+            st.remove_doc(i);
             sync_all(b, st);
         });
     });
@@ -714,15 +808,23 @@ fn wire_navigation(window: &AppWindow, ctx: &Ctx) {
                 Err(e) => show_error(&c2, e.message),
             }));
         } else {
-            let needs_listing = c.with(|b, st| {
-                st.show_browser = true;
-                st.show_settings = false;
-                sync_all(b, st);
-                !st.browse_root.is_empty()
-            });
-            if needs_listing == Some(true) {
-                list_dir(&c);
-            }
+            open_browser(&c);
+        }
+    });
+
+    // Desktop: pick the files to mux. Web: files are ticked in the library.
+    let c = ctx.clone();
+    b.on_mux_requested(move || {
+        if c.backend.capabilities().native_file_dialog {
+            let c2 = c.clone();
+            c.backend.pick_open_paths(Box::new(move |result| match result {
+                Ok(sources) if sources.is_empty() => {}
+                Ok(sources) if sources.len() < 2 => show_error(&c2, "Choose two or more files to mux.".into()),
+                Ok(sources) => open_mux(&c2, sources),
+                Err(e) => show_error(&c2, e.message),
+            }));
+        } else {
+            open_browser(&c);
         }
     });
 
@@ -750,6 +852,81 @@ fn wire_navigation(window: &AppWindow, ctx: &Ctx) {
 // ---------------------------------------------------------------------------
 // Volume browser (web)
 // ---------------------------------------------------------------------------
+
+/// Shows the library browser with a fresh listing.
+fn open_browser(ctx: &Ctx) {
+    let needs_listing = ctx.with(|b, st| {
+        st.show_browser = true;
+        st.show_settings = false;
+        sync_all(b, st);
+        !st.browse_root.is_empty()
+    });
+    if needs_listing == Some(true) {
+        list_dir(ctx);
+    }
+}
+
+/// Ticks in the listed rows, the selection count and the delete prompt.
+fn sync_browse(b: &Bridge, st: &State) {
+    let root_id = b.get_browse_root().to_string();
+    let model = b.get_browse_entries();
+    for i in 0..model.row_count() {
+        let Some(mut row) = model.row_data(i) else { continue };
+        let source = SourceRef::ServerPath { root_id: root_id.clone(), path: row.path.to_string() };
+        let selected = !row.is_dir && st.browse_selected.contains(&source);
+        if row.selected != selected {
+            row.selected = selected;
+            model.set_row_data(i, row);
+        }
+    }
+    b.set_browse_selected_count(st.browse_selected.len() as i32);
+    let prompt = match st.pending_delete.as_slice() {
+        [] => String::new(),
+        [one] => format!("Delete \u{201c}{}\u{201d} permanently? This can't be undone.", one.file_name()),
+        many => format!("Delete {} files permanently? This can't be undone.", many.len()),
+    };
+    b.set_delete_prompt(prompt.into());
+}
+
+type DeleteDone = Box<dyn FnOnce(&Ctx, usize, Vec<String>) + Send>;
+
+/// Deletes `queue` one file at a time, then calls `done` with how many were
+/// deleted and the failures. A deleted file leaves the browser selection and
+/// closes the idle tabs that read it, except tab `keep`.
+fn delete_files(ctx: &Ctx, mut queue: VecDeque<SourceRef>, keep: Option<u64>, deleted: usize, failures: Vec<String>, done: DeleteDone) {
+    let Some(source) = queue.pop_front() else {
+        if ctx.with(|_, st| !st.native) == Some(true) {
+            list_dir(ctx);
+        }
+        return done(ctx, deleted, failures);
+    };
+    let c = ctx.clone();
+    ctx.backend.delete_file(source.clone(), Box::new(move |result| {
+        let mut failures = failures;
+        let deleted = match result {
+            Ok(()) => {
+                c.with(|b, st| {
+                    st.browse_selected.retain(|s| *s != source);
+                    while let Some(i) = st
+                        .docs
+                        .iter()
+                        .position(|d| Some(d.id) != keep && !d.job.is_busy() && d.sources().contains(&&source))
+                    {
+                        st.remove_doc(i);
+                    }
+                    sync_all(b, st);
+                    sync_browse(b, st);
+                });
+                deleted + 1
+            }
+            Err(e) => {
+                failures.push(format!("{}: {}", source.file_name(), e.message));
+                deleted
+            }
+        };
+        delete_files(&c, queue, keep, deleted, failures, done);
+    }));
+}
 
 fn load_roots(ctx: &Ctx) {
     let c = ctx.clone();
@@ -792,11 +969,17 @@ fn list_dir(ctx: &Ctx) {
                     .entries
                     .iter()
                     .filter(|e| e.is_dir || e.name.to_ascii_lowercase().ends_with(".mkv"))
-                    .map(|e| DirRow { name: e.name.clone().into(), path: e.path.clone().into(), is_dir: e.is_dir })
+                    .map(|e| DirRow {
+                        name: e.name.clone().into(),
+                        path: e.path.clone().into(),
+                        is_dir: e.is_dir,
+                        selected: false,
+                    })
                     .collect();
                 b.set_browse_entries(ModelRc::new(VecModel::from(rows)));
                 b.set_browse_root(root.into());
                 b.set_browse_path(path.into());
+                sync_browse(b, st);
             }
             Err(e) => {
                 st.error = format!("Could not list folder: {}", e.message);
@@ -838,6 +1021,85 @@ fn wire_browser(window: &AppWindow, ctx: &Ctx) {
     });
 
     let c = ctx.clone();
+    b.on_browse_select(move |path, selected| {
+        c.with(|b, st| {
+            let source = SourceRef::ServerPath { root_id: b.get_browse_root().to_string(), path: path.to_string() };
+            st.browse_selected.retain(|s| *s != source);
+            if selected {
+                st.browse_selected.push(source);
+            }
+            sync_browse(b, st);
+        });
+    });
+
+    let c = ctx.clone();
+    b.on_browse_clear_selection(move || {
+        c.with(|b, st| {
+            st.browse_selected.clear();
+            sync_browse(b, st);
+        });
+    });
+
+    let c = ctx.clone();
+    b.on_browse_mux_selected(move || {
+        let sources = c.with(|b, st| {
+            if st.browse_selected.len() < 2 {
+                return None;
+            }
+            let sources = std::mem::take(&mut st.browse_selected);
+            sync_browse(b, st);
+            Some(sources)
+        });
+        if let Some(Some(sources)) = sources {
+            open_mux(&c, sources);
+        }
+    });
+
+    let c = ctx.clone();
+    b.on_browse_delete(move |path| {
+        c.with(|b, st| {
+            st.pending_delete = vec![SourceRef::ServerPath { root_id: b.get_browse_root().to_string(), path: path.to_string() }];
+            sync_browse(b, st);
+        });
+    });
+
+    let c = ctx.clone();
+    b.on_browse_delete_selected(move || {
+        c.with(|b, st| {
+            st.pending_delete = st.browse_selected.clone();
+            sync_browse(b, st);
+        });
+    });
+
+    let c = ctx.clone();
+    b.on_delete_cancelled(move || {
+        c.with(|b, st| {
+            st.pending_delete.clear();
+            sync_browse(b, st);
+        });
+    });
+
+    let c = ctx.clone();
+    b.on_delete_confirmed(move || {
+        let queue = c.with(|b, st| {
+            let pending = std::mem::take(&mut st.pending_delete);
+            sync_browse(b, st);
+            if let Some(busy) = pending.iter().find(|s| st.busy_reading(s, None)) {
+                st.error = format!("{} is being saved; delete it once that's done.", busy.file_name());
+                sync_nav(b, st);
+                return VecDeque::new();
+            }
+            pending.into()
+        });
+        let Some(queue) = queue.filter(|q| !q.is_empty()) else { return };
+        delete_files(&c, queue, None, 0, Vec::new(), Box::new(|c, _, failures| {
+            if !failures.is_empty() {
+                show_error(c, format!("Could not delete {}", failures.join("; ")));
+            }
+        }));
+    });
+
+    let c = ctx.clone();
     b.on_browse_close(move || {
         c.with(|b, st| {
             if !st.docs.is_empty() {
@@ -864,6 +1126,7 @@ fn edit_doc(ctx: &Ctx, rebuild_tracks: bool, f: impl FnOnce(&mut Document, &AppC
         sync_warnings(b, &doc);
         sync_output(b, &doc, &st.config, true);
         sync_job(b, &doc);
+        sync_mux(b, &doc);
         sync_nav(b, st);
         sync_settings_status(b, st);
     });
@@ -911,6 +1174,24 @@ fn wire_document(window: &AppWindow, ctx: &Ctx) {
                 touch(doc);
             }
             sync_all(b, st);
+        });
+    });
+
+    let c = ctx.clone();
+    b.on_mux_video_selected(move |i| {
+        let input = (i > 0).then(|| i as usize - 1);
+        edit_doc(&c, false, |doc, config| doc.set_video_from(input, config));
+    });
+
+    let c = ctx.clone();
+    b.on_mux_delete_toggled(move |delete| {
+        c.with(|b, st| {
+            if let Some(mux) = st.active.and_then(|i| st.docs.get_mut(i)).and_then(|d| d.mux.as_mut()) {
+                mux.delete_sources = delete;
+            }
+            if let Some(doc) = st.active_doc() {
+                sync_mux(b, doc);
+            }
         });
     });
 
@@ -1057,18 +1338,37 @@ fn update_doc(ctx: &Ctx, id: u64, f: impl FnOnce(&mut Document)) {
     });
 }
 
+/// What a save submits: one file's edit, or a mux (plus the sources to
+/// delete once it succeeds).
+enum JobInput {
+    Edit { source: SourceRef, order: Vec<u64>, edits: Vec<TrackEdit>, remove_attachments: Vec<AttachmentInfo> },
+    Mux { inputs: Vec<(SourceRef, Vec<AttachmentInfo>)>, tracks: Vec<MuxTrack>, delete_after: Vec<SourceRef> },
+}
+
 fn start_job(ctx: &Ctx, id: u64, output: SourceRef) {
     let job_input = ctx.with(|b, st| {
         let i = st.doc_index(id)?;
         let doc = &mut st.docs[i];
+        let input = match &doc.mux {
+            Some(mux) => {
+                let Some((inputs, tracks)) = doc.mux_job() else {
+                    doc.job = JobState::Failed { message: "Keep at least one track.".into() };
+                    return None;
+                };
+                let delete_after = if mux.delete_sources { inputs.iter().map(|(s, _)| s.clone()).collect() } else { Vec::new() };
+                JobInput::Mux { inputs, tracks, delete_after }
+            }
+            None => {
+                let kept = doc.kept();
+                JobInput::Edit {
+                    source: doc.source.clone(),
+                    order: kept.iter().map(|e| e.id).collect(),
+                    edits: kept,
+                    remove_attachments: doc.removed_attachments(),
+                }
+            }
+        };
         doc.job = JobState::Running { job: None, percent: 0 };
-        let kept = doc.kept();
-        let input = (
-            doc.source.clone(),
-            kept.iter().map(|e| e.id).collect::<Vec<_>>(),
-            kept,
-            doc.removed_attachments(),
-        );
         if st.active == Some(i) {
             let doc = doc.clone();
             sync_job(b, &doc);
@@ -1076,14 +1376,22 @@ fn start_job(ctx: &Ctx, id: u64, output: SourceRef) {
         sync_nav(b, st);
         Some(input)
     });
-    let Some(Some((source, order, edits, remove_attachments))) = job_input else { return };
+    let Some(Some(input)) = job_input else {
+        update_doc(ctx, id, |_| {});
+        run_next_in_queue(ctx);
+        return;
+    };
+    let delete_after = match &input {
+        JobInput::Mux { delete_after, .. } => delete_after.clone(),
+        JobInput::Edit { .. } => Vec::new(),
+    };
 
     let c = ctx.clone();
     let output_label = match &output {
         SourceRef::LocalPath(p) => p.clone(),
         SourceRef::ServerPath { path, .. } => format!("output:/{path}"),
     };
-    ctx.backend.submit_job(source, output, order, edits, remove_attachments, Box::new(move |result| match result {
+    let on_submitted: UiCallback<JobId> = Box::new(move |result| match result {
         Ok(job_id) => {
             update_doc(&c, id, |doc| doc.job = JobState::Running { job: Some(job_id.clone()), percent: 0 });
 
@@ -1097,12 +1405,16 @@ fn start_job(ctx: &Ctx, id: u64, output: SourceRef) {
             });
             let c_done = c.clone();
             let on_done: UiCallback<JobOutcome> = Box::new(move |result| {
+                let succeeded = result.is_ok();
                 update_doc(&c_done, id, |doc| {
                     doc.job = match result {
-                        Ok(_) => JobState::Done { output: output_label },
+                        Ok(_) => JobState::Done { output: output_label, note: String::new() },
                         Err(e) => JobState::Failed { message: e.message },
                     };
                 });
+                if succeeded && !delete_after.is_empty() {
+                    delete_muxed_sources(&c_done, id, delete_after);
+                }
                 run_next_in_queue(&c_done);
             });
             c.backend.watch_job(job_id, on_progress, on_done);
@@ -1110,6 +1422,41 @@ fn start_job(ctx: &Ctx, id: u64, output: SourceRef) {
         Err(e) => {
             update_doc(&c, id, |doc| doc.job = JobState::Failed { message: e.message });
             run_next_in_queue(&c);
+        }
+    });
+    match input {
+        JobInput::Edit { source, order, edits, remove_attachments } => {
+            ctx.backend.submit_job(source, output, order, edits, remove_attachments, on_submitted)
+        }
+        JobInput::Mux { inputs, tracks, .. } => ctx.backend.submit_mux(inputs, output, tracks, on_submitted),
+    }
+}
+
+/// After a mux saved: deletes the sources that went into it, except any
+/// another tab is still saving, and notes the result on the mux tab.
+fn delete_muxed_sources(ctx: &Ctx, id: u64, sources: Vec<SourceRef>) {
+    let total = sources.len();
+    let queue: VecDeque<SourceRef> = ctx
+        .with(|_, st| sources.into_iter().filter(|s| !st.busy_reading(s, Some(id))).collect())
+        .unwrap_or_default();
+    let skipped = total - queue.len();
+    delete_files(ctx, queue, Some(id), 0, Vec::new(), Box::new(move |c, deleted, failures| {
+        let plural = |n: usize| if n == 1 { "" } else { "s" };
+        let mut note = format!("Deleted {deleted} source file{}", plural(deleted));
+        let kept = skipped + failures.len();
+        if kept > 0 {
+            note.push_str(&format!(", kept {kept}"));
+        }
+        update_doc(c, id, |doc| {
+            if let JobState::Done { note: n, .. } = &mut doc.job {
+                *n = note;
+            }
+        });
+        if skipped > 0 {
+            show_error(c, format!("Kept {skipped} source file{} that another tab is saving.", plural(skipped)));
+        }
+        if !failures.is_empty() {
+            show_error(c, format!("Could not delete {}", failures.join("; ")));
         }
     }));
 }

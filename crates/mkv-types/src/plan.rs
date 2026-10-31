@@ -30,3 +30,31 @@ pub struct RemuxPlan {
     #[serde(default)]
     pub remove_attachments: Vec<AttachmentInfo>,
 }
+
+/// One source file of a [`MuxPlan`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MuxInput {
+    pub source_path: String,
+    /// Attachments of this file left out of the output; the rest are kept.
+    #[serde(default)]
+    pub remove_attachments: Vec<AttachmentInfo>,
+}
+
+/// A kept track of a [`MuxPlan`]: `edit.id` / `edit.uid` are the track's
+/// numbers in input `input`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MuxTrack {
+    pub input: usize,
+    pub edit: TrackEdit,
+}
+
+/// Several source files combined into one output with `mkvmerge`. Chapters,
+/// global tags and the title come from the first input only, so it should be
+/// the file the video is taken from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MuxPlan {
+    pub inputs: Vec<MuxInput>,
+    pub output_path: String,
+    /// Kept tracks in output order. Every input contributes at least one.
+    pub tracks: Vec<MuxTrack>,
+}

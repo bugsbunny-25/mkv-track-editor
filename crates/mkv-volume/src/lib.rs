@@ -123,6 +123,25 @@ impl VolumeManager {
         Ok(canonical_parent.join(file_name))
     }
 
+    /// Permanently deletes one file under `root_id`. Directories are refused,
+    /// and so is a symlink: it's resolved like any other path, so only the
+    /// file it points to inside the root could be reached, never the link.
+    pub fn remove_file(&self, root_id: &str, relative: &str) -> Result<PathBuf, VolumeError> {
+        let path = self.resolve(root_id, relative)?;
+        let metadata = std::fs::metadata(&path).map_err(|source| VolumeError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if !metadata.is_file() {
+            return Err(VolumeError::NotAFile);
+        }
+        std::fs::remove_file(&path).map_err(|source| VolumeError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        Ok(path)
+    }
+
     pub fn list_dir(&self, root_id: &str, relative: &str) -> Result<Vec<DirEntry>, VolumeError> {
         let dir = self.resolve(root_id, relative)?;
         let read_dir = std::fs::read_dir(&dir).map_err(|source| VolumeError::Io {
@@ -335,6 +354,19 @@ mod tests {
         let (_tmp, manager) = make_manager();
         let err = manager.resolve_output("/etc/passwd").unwrap_err();
         assert!(matches!(err, VolumeError::AbsolutePath));
+    }
+
+    #[test]
+    fn remove_file_deletes_only_files_inside_the_root() {
+        let (tmp, manager) = make_manager();
+        let removed = manager.remove_file("movies", "Season 1/ep1.mkv").unwrap();
+        assert!(removed.ends_with("Season 1/ep1.mkv"));
+        assert!(!tmp.path().join("library/Season 1/ep1.mkv").exists());
+
+        assert!(matches!(manager.remove_file("movies", "Season 1"), Err(VolumeError::NotAFile)));
+        assert!(matches!(manager.remove_file("movies", "../library/top.mkv"), Err(VolumeError::PathEscape)));
+        assert!(matches!(manager.remove_file("movies", "gone.mkv"), Err(VolumeError::Io { .. })));
+        assert!(tmp.path().join("library/top.mkv").exists());
     }
 
     #[test]
