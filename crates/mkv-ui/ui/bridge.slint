@@ -44,7 +44,8 @@ export struct TrackRowData {
     codec: string,
     detail: string,
     name: string,
-    language: string,
+    // Position in `track-language-labels`.
+    language-index: int,
     // Human-readable language ("English"); empty when unset/unknown.
     language-name: string,
     is-default: bool,
@@ -149,7 +150,10 @@ export global Bridge {
     callback move-track(int, int);
     callback set-keep(int, bool);
     callback rename-track(int, string);
-    callback set-language(int, string);
+    // Choices for a track's language ("English (en)"), shared by all rows.
+    in property <[string]> track-language-labels;
+    // Row, index into `track-language-labels`.
+    callback set-language(int, int);
     // flag: "default" | "forced" | "original" | "hi" | "vi" | "commentary"
     callback set-flag(int, string, bool);
 

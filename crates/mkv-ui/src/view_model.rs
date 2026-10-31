@@ -47,6 +47,8 @@ struct State {
     pending_delete: Vec<SourceRef>,
     /// Codes behind the language ComboBox as last shown ("" = not set).
     language_codes: Vec<String>,
+    /// Codes behind the track language pickers of the active document.
+    track_language_codes: Vec<String>,
     settings: SettingsState,
     /// "Save all": (doc id, output) waiting to run, one job at a time.
     save_queue: VecDeque<(u64, SourceRef)>,
@@ -252,6 +254,7 @@ fn new_app(backend: Arc<dyn Backend>) -> Result<App, slint::PlatformError> {
         browse_selected: Vec::new(),
         pending_delete: Vec::new(),
         language_codes: Vec::new(),
+        track_language_codes: Vec::new(),
         save_queue: VecDeque::new(),
         error: String::new(),
         drag: DragState::default(),
@@ -402,6 +405,10 @@ fn sync_doc(b: &Bridge, st: &mut State) {
     b.set_language_index(index as i32);
     st.language_codes = codes;
 
+    let track_codes = doc.track_language_options();
+    b.set_track_language_labels(strings(track_codes.iter().map(|c| format!("{} ({c})", lang::display_name(c)))));
+    st.track_language_codes = track_codes;
+
     sync_tracks(b, &doc, true);
     sync_warnings(b, &doc);
 
@@ -443,7 +450,7 @@ fn sync_warnings(b: &Bridge, doc: &Document) {
     b.set_warnings(strings(doc.warnings.iter().cloned()));
 }
 
-fn track_row(doc: &Document, i: usize) -> TrackRowData {
+fn track_row(doc: &Document, i: usize, language_options: &[String]) -> TrackRowData {
     let row = &doc.rows[i];
     let analysis: &FileAnalysis = &doc.analysis;
     let media = analysis.media.track(row.edit.uid);
@@ -509,7 +516,7 @@ fn track_row(doc: &Document, i: usize) -> TrackRowData {
         codec: codec.into(),
         detail: detail.into(),
         name: row.edit.name.clone().unwrap_or_default().into(),
-        language: row.edit.language.clone().unwrap_or_default().into(),
+        language_index: doc.track_language_index(i, language_options) as i32,
         is_default: f.default,
         is_forced: f.forced,
         is_original: f.original,
@@ -525,7 +532,8 @@ fn track_row(doc: &Document, i: usize) -> TrackRowData {
 /// Otherwise rows are updated in place so the list doesn't lose its scroll
 /// position or the focused editor.
 fn sync_tracks(b: &Bridge, doc: &Document, rebuild: bool) {
-    let rows: Vec<TrackRowData> = (0..doc.rows.len()).map(|i| track_row(doc, i)).collect();
+    let language_options = doc.track_language_options();
+    let rows: Vec<TrackRowData> = (0..doc.rows.len()).map(|i| track_row(doc, i, &language_options)).collect();
     if !rebuild {
         let model = b.get_tracks();
         if let Some(vm) = model.as_any().downcast_ref::<VecModel<TrackRowData>>() {
@@ -1245,16 +1253,18 @@ fn wire_tracks(window: &AppWindow, ctx: &Ctx) {
     });
 
     let c = ctx.clone();
-    b.on_set_language(move |row, text| {
+    b.on_set_language(move |row, index| {
+        let Some(Some(code)) = c.with(|_, st| st.track_language_codes.get(index.max(0) as usize).cloned()) else {
+            return;
+        };
         c.with_doc(|doc, config| {
-            doc.set_language(row as usize, &text, config);
+            doc.set_language(row as usize, &code, config);
             touch(doc);
         });
         c.with(|b, st| {
             if let Some(doc) = st.active_doc().cloned() {
                 // An auto-generated name may follow the language. Rows are
-                // updated in place, and the focused language field keeps
-                // its text.
+                // updated in place, so the list keeps its scroll position.
                 sync_tracks(b, &doc, false);
                 sync_output(b, &doc, &st.config, true);
             }

@@ -524,6 +524,35 @@ impl Document {
         }
     }
 
+    /// Choices for a track's language: the languages the file's tracks use
+    /// first (so a track's current language is always listed, even an
+    /// unusual one), then "und", then every other known language by name.
+    pub fn track_language_options(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for code in self.analysis.probe.tracks.iter().filter_map(|t| t.language.as_deref()) {
+            let code = lang::canonical(code);
+            if !code.is_empty() && code != "und" && !out.contains(&code) {
+                out.push(code);
+            }
+        }
+        out.push("und".into());
+        let mut rest: Vec<&lang::Language> = lang::LANGUAGES
+            .iter()
+            .filter(|l| !lang::is_undetermined(l.code()) && !out.iter().any(|c| c == l.code()))
+            .collect();
+        rest.sort_by_key(|l| l.name);
+        out.extend(rest.into_iter().map(|l| l.code().to_string()));
+        out
+    }
+
+    /// Position of a row's language in [`Self::track_language_options`]
+    /// (unset counts as "und").
+    pub fn track_language_index(&self, row: usize, options: &[String]) -> usize {
+        let code = self.rows.get(row).and_then(|r| r.edit.language.as_deref()).map(lang::canonical);
+        let code = code.filter(|c| !c.is_empty()).unwrap_or_else(|| "und".into());
+        options.iter().position(|o| *o == code).unwrap_or(0)
+    }
+
     /// Candidate original languages: the audio languages present in the
     /// file first (most likely picks), then every other known language.
     pub fn language_options(&self) -> Vec<String> {
@@ -845,6 +874,21 @@ mod tests {
         assert_eq!(&options[..3], ["te", "hi", "en"]);
         assert!(options.contains(&"ja".to_string()));
         assert!(!options.contains(&"und".to_string()));
+    }
+
+    #[test]
+    fn track_language_options_list_the_file_languages_first() {
+        let (mut doc, config) = open();
+        let options = doc.track_language_options();
+        assert_eq!(&options[..5], ["te", "hi", "en", "fr", "und"], "video's und is listed once, after them");
+        assert!(options.contains(&"ja".to_string()));
+
+        let sub = row_of(&doc, 4);
+        assert_eq!(options[doc.track_language_index(sub, &options)], "en");
+        doc.set_language(sub, "pt-BR", &config);
+        assert_eq!(options[doc.track_language_index(sub, &options)], "pt");
+        doc.set_language(sub, "", &config);
+        assert_eq!(options[doc.track_language_index(sub, &options)], "und");
     }
 
     #[test]
