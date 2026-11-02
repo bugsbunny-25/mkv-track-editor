@@ -1,6 +1,6 @@
 use crate::error::CoreError;
 use crate::process::{ProcessOutput, ProcessRunner, ProgressSink};
-use mkv_types::{RemuxPlan, TrackType};
+use mkv_types::{AttachmentInfo, RemuxPlan, TrackEdit, TrackType};
 
 /// Builds the full `mkvmerge` argument list for `plan`. Per-file track
 /// selection (`-a/-d/-s` or their negations) and per-track metadata options
@@ -8,20 +8,31 @@ use mkv_types::{RemuxPlan, TrackType};
 /// attach to whichever input file follows.
 pub fn build_mkvmerge_args(plan: &RemuxPlan) -> Vec<String> {
     let mut args = vec!["--gui-mode".to_string(), "-o".to_string(), plan.output_path.clone()];
+    push_input_options(&mut args, &plan.edits, &plan.remove_attachments);
 
-    let ids_of = |t: TrackType| -> Vec<u64> {
-        plan.edits
-            .iter()
-            .filter(|e| e.track_type == t)
-            .map(|e| e.id)
-            .collect()
-    };
+    args.push("--track-order".to_string());
+    let order = plan
+        .kept_track_order
+        .iter()
+        .map(|id| format!("0:{id}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    args.push(order);
 
-    push_track_selection(&mut args, "-d", "-D", &ids_of(TrackType::Video));
-    push_track_selection(&mut args, "-a", "-A", &ids_of(TrackType::Audio));
-    push_track_selection(&mut args, "-s", "-S", &ids_of(TrackType::Subtitles));
+    args.push(plan.source_path.clone());
+    args
+}
 
-    for edit in &plan.edits {
+/// Track selection, per-track metadata and attachment selection for one
+/// input file. mkvmerge applies them to the input file path that follows.
+pub(crate) fn push_input_options(args: &mut Vec<String>, edits: &[TrackEdit], remove_attachments: &[AttachmentInfo]) {
+    let ids_of = |t: TrackType| -> Vec<u64> { edits.iter().filter(|e| e.track_type == t).map(|e| e.id).collect() };
+
+    push_track_selection(args, "-d", "-D", &ids_of(TrackType::Video));
+    push_track_selection(args, "-a", "-A", &ids_of(TrackType::Audio));
+    push_track_selection(args, "-s", "-S", &ids_of(TrackType::Subtitles));
+
+    for edit in edits {
         args.push("--track-name".to_string());
         args.push(format!("{}:{}", edit.id, edit.name.clone().unwrap_or_default()));
 
@@ -46,25 +57,13 @@ pub fn build_mkvmerge_args(plan: &RemuxPlan) -> Vec<String> {
         }
     }
 
-    args.push("--track-order".to_string());
-    let order = plan
-        .kept_track_order
-        .iter()
-        .map(|id| format!("0:{id}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    args.push(order);
-
     // Every attachment not listed is copied, so fonts for styled subtitles
     // survive while cover images are dropped.
-    if !plan.remove_attachments.is_empty() {
+    if !remove_attachments.is_empty() {
         args.push("--attachments".to_string());
-        let ids: Vec<String> = plan.remove_attachments.iter().map(|a| a.id.to_string()).collect();
+        let ids: Vec<String> = remove_attachments.iter().map(|a| a.id.to_string()).collect();
         args.push(format!("!{}", ids.join(",")));
     }
-
-    args.push(plan.source_path.clone());
-    args
 }
 
 fn push_track_selection(args: &mut Vec<String>, keep_flag: &str, none_flag: &str, ids: &[u64]) {
@@ -100,7 +99,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mkv_types::{AttachmentInfo, TrackEdit, TrackFlags};
+    use mkv_types::TrackFlags;
 
     fn edit(id: u64, uid: u64, t: TrackType) -> TrackEdit {
         TrackEdit {

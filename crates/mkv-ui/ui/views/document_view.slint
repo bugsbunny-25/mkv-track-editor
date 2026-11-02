@@ -1,5 +1,5 @@
-// One open file: header with media facts and page switcher, the active
-// page, and the output/save bar.
+// One open file (or a mux of several): header with media facts and page
+// switcher, the mux panel, the active page, and the output/save bar.
 //
 // Responsive: from `lg` up the page fills the window between header and
 // output bar; below it the whole document scrolls and each page takes its
@@ -7,8 +7,9 @@
 
 import { ScrollView } from "std-widgets.slint";
 import {
-    TextField, Theme, Tone, Viewport, Icons, IconTile, Badge, Button, ButtonVariant, ControlSize, SegmentedControl,
-    Card, Banner, ProgressBar, AccentMark, DisplayText, CaptionText, OverlineText,
+    Select, TextField, Theme, Tone, Viewport, Icons, IconTile, Badge, Button, ButtonVariant, ControlSize,
+    SegmentedControl, ToggleRow, Card, Banner, ProgressBar, FormField, AccentMark, DisplayText, CaptionText,
+    OverlineText,
 } from "../components/index.slint";
 import { Bridge, BadgeData } from "../bridge.slint";
 import { ViewState, DocumentPage } from "view_state.slint";
@@ -94,6 +95,60 @@ component DocumentHeader inherits Card {
                 DocTitle { }
             }
             PageSwitcher { fill: true; }
+        }
+    }
+}
+
+component VideoFromField inherits FormField {
+    label: "Video from";
+    Select {
+        model: Bridge.mux-video-options;
+        current-index <=> Bridge.mux-video-index;
+        enabled: !Bridge.busy;
+        selected => { Bridge.mux-video-selected(self.current-index); }
+    }
+}
+
+component DeleteSourcesRow inherits ToggleRow {
+    label: "Delete the source files after saving";
+    description: "Only once the muxed file is saved. Files none of whose tracks are kept are left alone.";
+    checked: Bridge.mux-delete-sources;
+    enabled: !Bridge.busy;
+    toggled(value) => { Bridge.mux-delete-toggled(value); }
+}
+
+// A mux tab: the files being combined (tracks name them "File 1", …),
+// which file the video comes from, and whether the sources are deleted
+// once the muxed file is saved. Fields restack below `md`.
+component MuxPanel inherits Card {
+    VerticalLayout {
+        padding: Theme.space-4;
+        padding-left: Theme.space-5;
+        spacing: Theme.space-3;
+
+        HorizontalLayout {
+            spacing: Theme.space-3;
+            VerticalLayout {
+                alignment: center;
+                IconTile { icon: Icons.mux; tone: Tone.accent; }
+            }
+            VerticalLayout {
+                spacing: Theme.space-0-5;
+                horizontal-stretch: 1;
+                min-width: 0;
+                OverlineText { label: "Muxing " + Bridge.mux-sources.length + " files"; }
+                for name in Bridge.mux-sources: CaptionText { text: name; overflow: elide; }
+            }
+        }
+        if Viewport.md: HorizontalLayout {
+            spacing: Theme.space-5;
+            VideoFromField { width: Viewport.lg ? 360px : 280px; }
+            DeleteSourcesRow { }
+        }
+        if !Viewport.md: VerticalLayout {
+            spacing: Theme.space-3;
+            VideoFromField { }
+            DeleteSourcesRow { }
         }
     }
 }
@@ -226,6 +281,8 @@ component DocumentBody inherits VerticalLayout {
     spacing: Theme.space-4;
 
     DocumentHeader { }
+
+    if Bridge.doc-mux: MuxPanel { }
 
     for warning in Bridge.warnings: Banner { text: warning; tone: Tone.warning; }
 

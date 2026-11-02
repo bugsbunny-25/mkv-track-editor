@@ -11,7 +11,9 @@
 //! these callbacks without any further thread marshaling.
 
 use mkv_profiles::AppConfig;
-use mkv_types::{AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobProgress, RootInfo, TrackEdit};
+use mkv_types::{
+    AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobProgress, MuxTrack, RootInfo, TrackEdit,
+};
 
 /// Where a source or output file lives, as produced by one platform's own
 /// dialogs/browser and fed back into that same platform's `analyze` /
@@ -110,9 +112,23 @@ pub trait Backend: Send + Sync + 'static {
         cb: UiCallback<JobId>,
     );
 
+    /// Combines several files into the new file `output`. `inputs` pairs each
+    /// source with its attachments to leave out; `tracks` (in output order)
+    /// name their input by index. Watched like any other job.
+    fn submit_mux(
+        &self,
+        inputs: Vec<(SourceRef, Vec<AttachmentInfo>)>,
+        output: SourceRef,
+        tracks: Vec<MuxTrack>,
+        cb: UiCallback<JobId>,
+    );
+
     fn watch_job(&self, job: JobId, on_progress: ProgressCallback, on_done: UiCallback<JobOutcome>);
 
     fn cancel_job(&self, job: JobId);
+
+    /// Permanently deletes a source file (not a folder).
+    fn delete_file(&self, source: SourceRef, cb: UiCallback<()>);
 
     fn load_config(&self, cb: UiCallback<AppConfig>);
     fn save_config(&self, config: AppConfig, cb: UiCallback<()>);

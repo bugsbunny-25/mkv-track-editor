@@ -3,14 +3,16 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    # The container runs as an unprivileged user; ./output and ./config must
-    # be writable by it. Easiest: run as your own UID/GID (see `id -u`/`id -g`).
+    # The container runs as an unprivileged user; ./output and ./config (and
+    # ./library, to delete files) must be writable by it. Easiest: run as your
+    # own UID/GID (see `id -u`/`id -g`).
     # user: "1000:1000"
     ports:
       - "8080:8080"
     volumes:
-      # Read-only source library, browsable in the web UI.
-      - ./library:/data/library:ro
+      # Source library, browsable in the web UI. Writable so files can be
+      # deleted there (or after muxing them); append `:ro` to protect it.
+      - ./library:/data/library
       # Where edited files are written; kept separate from the source
       # library by default.
       - ./output:/data/output

@@ -37,12 +37,15 @@ export struct DocTabData {
 export struct TrackRowData {
     keep: bool,
     kind: TrackKind,
+    // Mux tabs: the file the track comes from ("File 2"); empty otherwise.
+    source: string,
     // 1-based position among tracks of the same kind ("Audio 2").
     ordinal: int,
     codec: string,
     detail: string,
     name: string,
-    language: string,
+    // Position in `track-language-labels`.
+    language-index: int,
     // Human-readable language ("English"); empty when unset/unknown.
     language-name: string,
     is-default: bool,
@@ -64,6 +67,8 @@ export struct DirRow {
     name: string,
     path: string,
     is-dir: bool,
+    // Ticked for muxing or deleting.
+    selected: bool,
 }
 
 export global Bridge {
@@ -80,6 +85,8 @@ export global Bridge {
     callback select-tab(int);
     callback close-tab(int);
     callback open-requested();
+    // Combine several files into one output.
+    callback mux-requested();
     callback toggle-settings();
     callback dismiss-error();
 
@@ -97,6 +104,17 @@ export global Bridge {
     callback browse-entry-activated(string, bool);
     callback browse-up();
     callback browse-close();
+    // Ticked files, across folders.
+    in property <int> browse-selected-count;
+    callback browse-select(string, bool);
+    callback browse-clear-selection();
+    callback browse-mux-selected();
+    // Asks for confirmation (`delete-prompt`) before deleting.
+    callback browse-delete(string);
+    callback browse-delete-selected();
+    in property <string> delete-prompt;
+    callback delete-confirmed();
+    callback delete-cancelled();
 
     // --- active document header -------------------------------------------
     // Header: "Dune: Part Two (2024)", the file name and media facts.
@@ -116,12 +134,26 @@ export global Bridge {
     callback reset-tracks();
     callback apply-all();
 
+    // --- mux (a tab combining several files) ----------------------------
+    in property <bool> doc-mux;
+    // "File 1 · name.mkv", one per source.
+    in property <[string]> mux-sources;
+    // "Auto: …" followed by the sources.
+    in property <[string]> mux-video-options;
+    in-out property <int> mux-video-index;
+    in property <bool> mux-delete-sources;
+    callback mux-video-selected(int);
+    callback mux-delete-toggled(bool);
+
     // --- tracks -------------------------------------------------------
     in property <[TrackRowData]> tracks;
     callback move-track(int, int);
     callback set-keep(int, bool);
     callback rename-track(int, string);
-    callback set-language(int, string);
+    // Choices for a track's language ("English (en)"), shared by all rows.
+    in property <[string]> track-language-labels;
+    // Row, index into `track-language-labels`.
+    callback set-language(int, int);
     // flag: "default" | "forced" | "original" | "hi" | "vi" | "commentary"
     callback set-flag(int, string, bool);
 

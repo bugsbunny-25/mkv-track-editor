@@ -3,13 +3,16 @@
 //! verbatim by desktop and wasm and unit-testable on its own.
 
 use crate::backend::SourceRef;
+use crate::mux::{self, Mux};
 use mkv_profiles::labels::{audio_attrs, video_attrs, DynamicRange};
 use mkv_profiles::lang;
 use mkv_profiles::{
     apply_profile, guess_original_language, render_file_name, summarize, track_name, AppConfig, MediaSummary,
     NamingMetadata,
 };
-use mkv_types::{is_image_codec, AttachmentInfo, FileAnalysis, JobId, TrackEdit, TrackFlags, TrackType};
+use mkv_types::{
+    is_image_codec, AttachmentInfo, FileAnalysis, JobId, MuxTrack, TrackEdit, TrackFlags, TrackType,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
@@ -23,7 +26,8 @@ pub enum JobState {
     /// Waiting in a "Save all" queue.
     Queued,
     Running { job: Option<JobId>, percent: u8 },
-    Done { output: String },
+    /// `note`: what happened afterwards, e.g. deleting a mux's sources.
+    Done { output: String, note: String },
     Failed { message: String },
 }
 
@@ -64,7 +68,10 @@ pub enum Flag {
 #[derive(Debug, Clone)]
 pub struct Document {
     pub id: u64,
+    /// For a mux, its first file.
     pub source: SourceRef,
+    /// Set when the document combines several files into one output.
+    pub mux: Option<Mux>,
     pub analysis: FileAnalysis,
     pub profile: String,
     pub original_language: Option<String>,
@@ -83,9 +90,29 @@ impl Document {
     /// Opens a file and immediately applies the first profile, so the tab
     /// starts out showing the proposed result (which the user can reset).
     pub fn open(id: u64, source: SourceRef, analysis: FileAnalysis, config: &AppConfig) -> Self {
+        Self::new(id, source, None, analysis, config)
+    }
+
+    /// Opens several files (in `sources` order, analyses alike) as one
+    /// document whose output combines them. The video comes from the file
+    /// of the default audio track the profile picks, and the naming fields
+    /// are prefilled from that file's name.
+    pub fn open_mux(id: u64, sources: Vec<SourceRef>, analyses: Vec<FileAnalysis>, config: &AppConfig) -> Self {
+        let (analysis, mux) = mux::combine(sources, analyses);
+        let source = mux.sources[0].clone();
+        let mut doc = Self::new(id, source, Some(mux), analysis, config);
+        if let Some(video) = doc.video_input().and_then(|i| doc.mux.as_ref()?.sources.get(i).cloned()) {
+            doc.metadata = NamingMetadata::from_file_name(video.file_name(), &config.naming);
+            doc.refresh_output_name(config);
+        }
+        doc
+    }
+
+    fn new(id: u64, source: SourceRef, mux: Option<Mux>, analysis: FileAnalysis, config: &AppConfig) -> Self {
         let metadata = NamingMetadata::from_file_name(source.file_name(), &config.naming);
         let mut doc = Self {
             id,
+            mux,
             original_language: guess_original_language(&analysis),
             profile: config.profiles.first().map(|p| p.name.clone()).unwrap_or_default(),
             rows: Vec::new(),
@@ -104,8 +131,21 @@ impl Document {
         doc
     }
 
-    pub fn title(&self) -> &str {
-        self.source.file_name()
+    /// Tab title: the file name, or for a mux its first file's name and
+    /// how many more it combines.
+    pub fn title(&self) -> String {
+        match &self.mux {
+            Some(m) if m.sources.len() > 1 => format!("{} + {} more", self.source.file_name(), m.sources.len() - 1),
+            _ => self.source.file_name().to_string(),
+        }
+    }
+
+    /// Every file the document reads.
+    pub fn sources(&self) -> Vec<&SourceRef> {
+        match &self.mux {
+            Some(m) => m.sources.iter().collect(),
+            None => vec![&self.source],
+        }
     }
 
     /// The file's tracks exactly as they are on disk.
@@ -128,8 +168,9 @@ impl Document {
             .collect()
     }
 
+    /// A mux always has something to save: the combined file.
     pub fn has_changes(&self) -> bool {
-        self.rows != self.original_rows() || !self.removed_attachments().is_empty()
+        self.mux.is_some() || self.rows != self.original_rows() || !self.removed_attachments().is_empty()
     }
 
     /// Rows that differ from the file on disk (dropped, edited or moved),
@@ -159,7 +200,7 @@ impl Document {
     pub fn display_title(&self) -> String {
         let title = self.metadata.title.trim();
         match (title.is_empty(), self.metadata.year) {
-            (true, _) => self.title().trim_end_matches(".mkv").to_string(),
+            (true, _) => self.source.file_name().trim_end_matches(".mkv").to_string(),
             (false, Some(year)) => format!("{title} ({year})"),
             (false, None) => title.to_string(),
         }
@@ -234,13 +275,132 @@ impl Document {
             .into_iter()
             .map(|t| Row { keep: t.keep, edit: t.edit })
             .collect();
+        self.follow_video_source();
         self.refresh_output_name(config);
     }
 
+    /// The file as it is on disk; for a mux, every file's tracks, but
+    /// still one file's video.
     pub fn reset(&mut self, config: &AppConfig) {
         self.rows = self.original_rows();
         self.warnings = self.attachment_notices();
+        self.follow_video_source();
         self.refresh_output_name(config);
+    }
+
+    /// For a mux: the file a row's track comes from.
+    pub fn input_of(&self, row: usize) -> Option<usize> {
+        let mux = self.mux.as_ref()?;
+        Some(mux.track(self.rows.get(row)?.edit.id)?.input)
+    }
+
+    fn is_image_row(&self, row: &Row) -> bool {
+        self.analysis.probe.tracks.iter().any(|t| t.uid == row.edit.uid && t.is_image())
+    }
+
+    /// For a mux: the file whose video is kept — the user's choice, else
+    /// the file of the kept default audio track (or of the first kept audio
+    /// track, or the first file with a video).
+    pub fn video_input(&self) -> Option<usize> {
+        let mux = self.mux.as_ref()?;
+        if let Some(input) = mux.video_from {
+            return Some(input);
+        }
+        let of_type = |t: TrackType| (0..self.rows.len()).filter(move |&i| self.rows[i].edit.track_type == t);
+        let audio = || of_type(TrackType::Audio).filter(|&i| self.rows[i].keep);
+        audio()
+            .find(|&i| self.rows[i].edit.flags.default)
+            .or_else(|| audio().next())
+            .or_else(|| of_type(TrackType::Video).find(|&i| !self.is_image_row(&self.rows[i])))
+            .and_then(|i| self.input_of(i))
+            .or(Some(0))
+    }
+
+    /// For a mux: keeps the video of [`Self::video_input`] only (default
+    /// on its first track) and drops the other files' video. Cover-art
+    /// tracks are left as the profile proposed.
+    fn follow_video_source(&mut self) {
+        let Some(target) = self.video_input() else { return };
+        let mut first = true;
+        for i in 0..self.rows.len() {
+            if self.rows[i].edit.track_type != TrackType::Video || self.is_image_row(&self.rows[i]) {
+                continue;
+            }
+            let keep = self.input_of(i) == Some(target);
+            let row = &mut self.rows[i];
+            row.keep = keep;
+            row.edit.flags.default = keep && first;
+            first &= !keep;
+        }
+    }
+
+    /// For a mux: choose the file whose video is kept (`None` follows
+    /// the default audio track again).
+    pub fn set_video_from(&mut self, input: Option<usize>, config: &AppConfig) {
+        if let Some(mux) = &mut self.mux {
+            mux.video_from = input.filter(|&i| i < mux.sources.len());
+            self.follow_video_source();
+            self.refresh_output_name(config);
+        }
+    }
+
+    /// While the video follows the default audio, re-picks it after an
+    /// audio row changed.
+    fn audio_changed(&mut self, row: usize) {
+        let follows = self.mux.as_ref().is_some_and(|m| m.video_from.is_none());
+        if follows && self.rows.get(row).is_some_and(|r| r.edit.track_type == TrackType::Audio) {
+            self.follow_video_source();
+        }
+    }
+
+    /// For a mux: the sources that go into the output, in mkvmerge input
+    /// order (the video's file first, since chapters and the title come from
+    /// the first input), each with its attachments to leave out, and the kept
+    /// tracks renumbered to those inputs. Files none of whose tracks are kept
+    /// aren't inputs at all.
+    pub fn mux_job(&self) -> Option<(Vec<(SourceRef, Vec<AttachmentInfo>)>, Vec<MuxTrack>)> {
+        let mux = self.mux.as_ref()?;
+        let kept: Vec<usize> = (0..self.rows.len()).filter(|&i| self.rows[i].keep).collect();
+        let primary = kept
+            .iter()
+            .find(|&&i| self.rows[i].edit.track_type == TrackType::Video && !self.is_image_row(&self.rows[i]))
+            .or(kept.first())
+            .and_then(|&i| self.input_of(i))?;
+
+        let mut order = vec![primary];
+        for i in &kept {
+            let input = self.input_of(*i)?;
+            if !order.contains(&input) {
+                order.push(input);
+            }
+        }
+        // Keep the user's file order after the primary.
+        order[1..].sort_unstable();
+        let position = |input: usize| order.iter().position(|&o| o == input);
+
+        let removed = self.removed_attachments();
+        let inputs = order
+            .iter()
+            .map(|&input| {
+                let attachments = removed
+                    .iter()
+                    .filter_map(|a| {
+                        let origin = mux.attachments.get(a.id as usize)?;
+                        (origin.input == input).then(|| AttachmentInfo { id: origin.id, uid: origin.uid, ..a.clone() })
+                    })
+                    .collect();
+                (mux.sources[input].clone(), attachments)
+            })
+            .collect();
+        let tracks = kept
+            .iter()
+            .map(|&i| {
+                let origin = mux.track(self.rows[i].edit.id)?;
+                let edit = TrackEdit { id: origin.id, uid: origin.uid, ..self.rows[i].edit.clone() };
+                Some(MuxTrack { input: position(origin.input)?, edit })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some((inputs, tracks))
     }
 
     pub fn kept(&self) -> Vec<TrackEdit> {
@@ -281,10 +441,19 @@ impl Document {
         }
     }
 
+    /// In a mux, keeping a video track pins the video to its file; the
+    /// video no longer follows the default audio.
     pub fn set_keep(&mut self, row: usize, keep: bool, config: &AppConfig) {
         if let Some(r) = self.rows.get_mut(row) {
             r.keep = keep;
         }
+        let pinned = self.input_of(row).filter(|_| {
+            keep && self.rows[row].edit.track_type == TrackType::Video && !self.is_image_row(&self.rows[row])
+        });
+        if let (Some(input), Some(mux)) = (pinned, &mut self.mux) {
+            mux.video_from = Some(input);
+        }
+        self.audio_changed(row);
         self.refresh_output_name(config);
     }
 
@@ -329,6 +498,9 @@ impl Document {
     /// is almost always a mistake. An auto-generated name follows the flags.
     pub fn set_flag(&mut self, row: usize, flag: Flag, value: bool, config: &AppConfig) {
         self.edit_named(row, config, |doc| doc.apply_flag(row, flag, value));
+        if flag == Flag::Default {
+            self.audio_changed(row);
+        }
         self.refresh_output_name(config);
     }
 
@@ -350,6 +522,35 @@ impl Document {
             Flag::VisualImpaired => f.visual_impaired = value,
             Flag::Commentary => f.commentary = value,
         }
+    }
+
+    /// Choices for a track's language: the languages the file's tracks use
+    /// first (so a track's current language is always listed, even an
+    /// unusual one), then "und", then every other known language by name.
+    pub fn track_language_options(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for code in self.analysis.probe.tracks.iter().filter_map(|t| t.language.as_deref()) {
+            let code = lang::canonical(code);
+            if !code.is_empty() && code != "und" && !out.contains(&code) {
+                out.push(code);
+            }
+        }
+        out.push("und".into());
+        let mut rest: Vec<&lang::Language> = lang::LANGUAGES
+            .iter()
+            .filter(|l| !lang::is_undetermined(l.code()) && !out.iter().any(|c| c == l.code()))
+            .collect();
+        rest.sort_by_key(|l| l.name);
+        out.extend(rest.into_iter().map(|l| l.code().to_string()));
+        out
+    }
+
+    /// Position of a row's language in [`Self::track_language_options`]
+    /// (unset counts as "und").
+    pub fn track_language_index(&self, row: usize, options: &[String]) -> usize {
+        let code = self.rows.get(row).and_then(|r| r.edit.language.as_deref()).map(lang::canonical);
+        let code = code.filter(|c| !c.is_empty()).unwrap_or_else(|| "und".into());
+        options.iter().position(|o| *o == code).unwrap_or(0)
     }
 
     /// Candidate original languages: the audio languages present in the
@@ -676,6 +877,21 @@ mod tests {
     }
 
     #[test]
+    fn track_language_options_list_the_file_languages_first() {
+        let (mut doc, config) = open();
+        let options = doc.track_language_options();
+        assert_eq!(&options[..5], ["te", "hi", "en", "fr", "und"], "video's und is listed once, after them");
+        assert!(options.contains(&"ja".to_string()));
+
+        let sub = row_of(&doc, 4);
+        assert_eq!(options[doc.track_language_index(sub, &options)], "en");
+        doc.set_language(sub, "pt-BR", &config);
+        assert_eq!(options[doc.track_language_index(sub, &options)], "pt");
+        doc.set_language(sub, "", &config);
+        assert_eq!(options[doc.track_language_index(sub, &options)], "und");
+    }
+
+    #[test]
     fn media_info_filtering() {
         let (mut doc, _) = open();
         assert_eq!(doc.info_rows(), [("Format".to_string(), "Matroska".to_string())]);
@@ -707,6 +923,116 @@ mod tests {
         doc.reset(&config);
         let subs = doc.header_facts().into_iter().find(|f| f.kind == FactKind::Subtitle).unwrap();
         assert_eq!(subs.text, "2 subtitles");
+    }
+
+    /// File 1: 2160p video, English audio and subs. File 2: 1080p video,
+    /// Telugu audio flagged original, Hindi audio and a cover image. Both
+    /// number their tracks from 0 with the same UIDs.
+    fn open_mux() -> (Document, AppConfig) {
+        let config = AppConfig::default();
+        let mut uhd = analysis();
+        uhd.file_name = "Movie.2020.2160p.WEB-DL.DDP5.1.H.265-UHD.mkv".into();
+        uhd.probe.tracks = vec![
+            track(0, TrackType::Video, "und", "HEVC/H.265/MPEG-H"),
+            track(1, TrackType::Audio, "eng", "E-AC-3"),
+            track(2, TrackType::Subtitles, "eng", "SubRip/SRT"),
+        ];
+        uhd.media.tracks[0].width = Some(3840);
+        uhd.media.tracks[0].height = Some(2160);
+        let mut telugu = analysis();
+        telugu.probe.tracks = vec![
+            track(0, TrackType::Video, "und", "AVC/H.264/MPEG-4p10"),
+            track(1, TrackType::Audio, "tel", "E-AC-3"),
+            track(2, TrackType::Audio, "hin", "AC-3"),
+        ];
+        telugu.probe.tracks[1].flags.original = true;
+        telugu.probe.attachments = vec![AttachmentInfo {
+            id: 1,
+            uid: 900,
+            file_name: "cover.jpg".into(),
+            mime_type: "image/jpeg".into(),
+            size: 1,
+        }];
+        let sources = vec![
+            SourceRef::LocalPath("/lib/Movie.2020.2160p.WEB-DL.DDP5.1.H.265-UHD.mkv".into()),
+            SourceRef::LocalPath("/lib/Movie.2020.1080p.BluRay.x264-GRP.mkv".into()),
+        ];
+        (Document::open_mux(1, sources, vec![uhd, telugu], &config), config)
+    }
+
+    /// (file, id in that file) of the kept tracks, in order.
+    fn kept_origins(doc: &Document) -> Vec<(usize, u64)> {
+        let mux = doc.mux.as_ref().unwrap();
+        doc.kept().iter().map(|e| mux.track(e.id).map(|o| (o.input, o.id)).unwrap()).collect()
+    }
+
+    #[test]
+    fn mux_video_follows_the_default_audio() {
+        let (doc, _) = open_mux();
+        assert_eq!(doc.original_language.as_deref(), Some("te"));
+        // Telugu rule keeps only Telugu audio (file 2), so file 2's video.
+        assert_eq!(kept_origins(&doc), [(1, 0), (1, 1), (0, 2)]);
+        assert_eq!(doc.video_input(), Some(1));
+        assert!(doc.kept()[0].flags.default);
+        assert_eq!(doc.title(), "Movie.2020.2160p.WEB-DL.DDP5.1.H.265-UHD.mkv + 1 more");
+        assert!(doc.has_changes());
+        // Naming comes from the file the video is taken from.
+        assert_eq!(doc.metadata.release_group, "GRP");
+    }
+
+    #[test]
+    fn mux_video_choice_sticks_until_auto() {
+        let (mut doc, config) = open_mux();
+        doc.set_video_from(Some(0), &config);
+        assert_eq!(kept_origins(&doc)[0], (0, 0), "2160p video from file 1");
+        assert!(!doc.rows[row_of(&doc, 3)].keep, "file 2's video is dropped");
+
+        // Re-applying the profile keeps the user's choice.
+        doc.apply_profile(&config);
+        assert_eq!(kept_origins(&doc)[0], (0, 0));
+
+        doc.set_video_from(None, &config);
+        assert_eq!(kept_origins(&doc)[0], (1, 0));
+    }
+
+    #[test]
+    fn mux_video_follows_a_manual_default_audio_change() {
+        let (mut doc, config) = open_mux();
+        let english = row_of(&doc, 1);
+        doc.set_keep(english, true, &config);
+        doc.set_flag(english, Flag::Default, true, &config);
+        assert_eq!(doc.video_input(), Some(0));
+        assert_eq!(kept_origins(&doc)[0], (0, 0));
+
+        // Keeping a video by hand pins it.
+        let video_2 = row_of(&doc, 3);
+        doc.set_keep(video_2, true, &config);
+        assert_eq!(doc.mux.as_ref().unwrap().video_from, Some(1));
+        doc.set_flag(english, Flag::Default, true, &config);
+        assert_eq!(doc.video_input(), Some(1));
+    }
+
+    #[test]
+    fn mux_job_maps_tracks_back_to_their_files() {
+        let (mut doc, config) = open_mux();
+        doc.set_video_from(Some(0), &config);
+        let (inputs, tracks) = doc.mux_job().unwrap();
+
+        // The video's file is the first input.
+        let files: Vec<&str> = inputs.iter().map(|(s, _)| s.file_name()).collect();
+        assert_eq!(files, ["Movie.2020.2160p.WEB-DL.DDP5.1.H.265-UHD.mkv", "Movie.2020.1080p.BluRay.x264-GRP.mkv"]);
+        let order: Vec<(usize, u64, u64)> = tracks.iter().map(|t| (t.input, t.edit.id, t.edit.uid)).collect();
+        assert_eq!(order, [(0, 0, 100), (1, 1, 101), (0, 2, 102)], "original ids and UIDs");
+        assert_eq!(inputs[1].1.iter().map(|a| (a.id, a.uid)).collect::<Vec<_>>(), [(1, 900)]);
+
+        // A file none of whose tracks are kept isn't an input; the video's
+        // file still comes first.
+        doc.set_video_from(Some(1), &config);
+        let subtitles = row_of(&doc, 2);
+        doc.set_keep(subtitles, false, &config);
+        let (inputs, tracks) = doc.mux_job().unwrap();
+        assert_eq!(inputs.len(), 1);
+        assert!(tracks.iter().all(|t| t.input == 0));
     }
 
     #[test]

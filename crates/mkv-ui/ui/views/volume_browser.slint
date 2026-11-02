@@ -1,12 +1,101 @@
 // Server-side file browser (web build only): the browser can't touch the
 // container's filesystem, so directories are listed through the API and
-// every path is resolved/validated server-side.
+// every path is resolved/validated server-side. Files can be ticked (across
+// folders) to mux them into one file or delete them; deleting always asks
+// first.
 
 import { ListView } from "std-widgets.slint";
 import {
-    Theme, Tone, Viewport, Icons, Icon, Button, ButtonVariant, Card, Divider, NavItem, DisplayText, AccentMark, SecondaryText, CaptionText,
+    Theme, Tone, Viewport, Icons, Icon, IconTile, Button, IconButton, ButtonVariant, Card, Divider, NavItem, Toggle,
+    DisplayText, AccentMark, BodyText, LabelText, SecondaryText, CaptionText,
 } from "../components/index.slint";
 import { Bridge } from "../bridge.slint";
+
+component DeleteButtons inherits HorizontalLayout {
+    spacing: Theme.space-2;
+    Button {
+        text: "Cancel";
+        variant: ButtonVariant.ghost;
+        clicked => { Bridge.delete-cancelled(); }
+    }
+    Button {
+        text: "Delete";
+        icon: Icons.trash;
+        variant: ButtonVariant.danger;
+        clicked => { Bridge.delete-confirmed(); }
+    }
+}
+
+// Shown while a deletion waits for confirmation. Styled like a danger
+// `Banner`, with the answer buttons beside the prompt (below it on phones).
+component DeleteConfirm inherits Rectangle {
+    border-radius: Theme.radius-md;
+    border-width: Theme.border-width;
+    border-color: Theme.tone-solid(Tone.danger);
+    background: Theme.tone-background(Tone.danger);
+
+    VerticalLayout {
+        padding: Theme.space-2;
+        padding-left: Theme.space-2;
+        spacing: Theme.space-2;
+        HorizontalLayout {
+            spacing: Theme.space-2 + Theme.space-0-5;
+            VerticalLayout {
+                alignment: center;
+                IconTile { icon: Icons.trash; tone: Tone.danger; size: Theme.tile-xs; icon-size: Theme.icon-sm; }
+            }
+            BodyText {
+                text: Bridge.delete-prompt;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                font-weight: Theme.weight-medium;
+                color: Theme.tone-foreground(Tone.danger);
+            }
+            if Viewport.sm: DeleteButtons { }
+        }
+        if !Viewport.sm: HorizontalLayout {
+            alignment: end;
+            DeleteButtons { }
+        }
+    }
+}
+
+// Actions for the ticked files.
+component SelectionBar inherits HorizontalLayout {
+    spacing: Theme.space-2;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        min-width: 0;
+        LabelText {
+            text: Bridge.browse-selected-count == 1 ? "1 file selected" : Bridge.browse-selected-count + " files selected";
+            overflow: elide;
+        }
+    }
+    Button {
+        text: Viewport.sm ? "Clear" : "";
+        icon: Icons.close;
+        variant: ButtonVariant.ghost;
+        accessible-name: "Clear selection";
+        clicked => { Bridge.browse-clear-selection(); }
+    }
+    Button {
+        text: Viewport.sm ? "Delete" : "";
+        icon: Icons.trash;
+        variant: ButtonVariant.danger;
+        accessible-name: "Delete selected files";
+        clicked => { Bridge.browse-delete-selected(); }
+    }
+    Button {
+        text: "Mux";
+        icon: Icons.mux;
+        variant: ButtonVariant.primary;
+        enabled: Bridge.browse-selected-count >= 2;
+        accessible-name: "Mux selected files into one";
+        clicked => { Bridge.browse-mux-selected(); }
+    }
+}
 
 export component VolumeBrowser inherits VerticalLayout {
     padding: Viewport.gutter;
@@ -22,7 +111,10 @@ export component VolumeBrowser inherits VerticalLayout {
                 alignment: start;
                 AccentMark { }
             }
-            SecondaryText { text: "Choose a file to open it in a new tab. Only .mkv files are shown."; wrap: word-wrap; }
+            SecondaryText {
+                text: "Choose a file to open it in a new tab, or tick several to mux them into one file. Only .mkv files are shown.";
+                wrap: word-wrap;
+            }
         }
         if Bridge.tabs.length > 0: VerticalLayout {
             alignment: center;
@@ -54,6 +146,9 @@ export component VolumeBrowser inherits VerticalLayout {
             }
         }
     }
+
+    if Bridge.delete-prompt != "": DeleteConfirm { }
+    if Bridge.browse-selected-count > 0 && Bridge.delete-prompt == "": SelectionBar { }
 
     Card {
         vertical-stretch: 1;
@@ -89,11 +184,30 @@ export component VolumeBrowser inherits VerticalLayout {
                     padding-right: Theme.space-2;
                     padding-top: Theme.space-0-5;
                     padding-bottom: Theme.space-0-5;
+                    spacing: Theme.space-1;
+                    // Folders get a blank in place of the tick so names line up.
+                    if entry.is-dir: Rectangle { width: Theme.touch-target; }
+                    if !entry.is-dir: VerticalLayout {
+                        alignment: center;
+                        Toggle {
+                            checked: entry.selected;
+                            accessible-name: "Select " + entry.name;
+                            toggled(value) => { Bridge.browse-select(entry.path, value); }
+                        }
+                    }
                     NavItem {
                         text: entry.name;
                         icon: entry.is-dir ? Icons.folder : Icons.video;
                         icon-tone: entry.is-dir ? Tone.accent : Tone.video;
                         clicked => { Bridge.browse-entry-activated(entry.path, entry.is-dir); }
+                    }
+                    if !entry.is-dir: VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: Icons.trash;
+                            accessible-name: "Delete " + entry.name;
+                            clicked => { Bridge.browse-delete(entry.path); }
+                        }
                     }
                 }
             }

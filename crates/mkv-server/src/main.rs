@@ -2,7 +2,7 @@ mod error;
 mod handlers;
 mod jobs;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use jobs::JobRegistry;
 use mkv_core::{config_store, TokioProcessRunner, ToolPaths};
@@ -74,9 +74,11 @@ async fn main() {
     let app = Router::new()
         .route("/api/volumes", get(handlers::list_volumes))
         .route("/api/browse/{root_id}", get(handlers::browse))
+        .route("/api/files/{root_id}", delete(handlers::delete_file))
         .route("/api/analyze", post(handlers::analyze))
         .route("/api/config", get(handlers::get_config).put(handlers::put_config))
         .route("/api/jobs", post(handlers::submit_job))
+        .route("/api/mux", post(handlers::submit_mux))
         .route("/api/jobs/{id}/events", get(handlers::job_events))
         .route("/api/jobs/{id}/cancel", post(handlers::cancel_job))
         .fallback_service(ServeDir::new(static_dir).append_index_html_on_directories(true))

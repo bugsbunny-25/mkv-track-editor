@@ -3,8 +3,8 @@
 //! and are skipped (not failed) when either tool isn't on `PATH`, since
 //! `ffmpeg` is a test-fixture convenience, not a project dependency.
 
-use mkv_core::{analyze, execute_plan, probe, ExecutionStrategy, TokioProcessRunner, ToolPaths};
-use mkv_types::{JobProgress, RemuxPlan, TrackEdit, TrackFlags, TrackType};
+use mkv_core::{analyze, execute_mux, execute_plan, probe, ExecutionStrategy, TokioProcessRunner, ToolPaths};
+use mkv_types::{JobProgress, MuxInput, MuxPlan, MuxTrack, RemuxPlan, TrackEdit, TrackFlags, TrackType};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
@@ -349,4 +349,63 @@ async fn removes_image_attachments_and_keeps_fonts_on_both_paths() {
         let names: Vec<&str> = result.attachments.iter().map(|a| a.file_name.as_str()).collect();
         assert_eq!(names, ["font.ttf"], "{name}: only the image is removed");
     }
+}
+
+#[tokio::test]
+async fn muxes_tracks_from_two_files_through_real_mkvmerge() {
+    if !binary_available("mkvmerge").await || !binary_available("ffmpeg").await {
+        eprintln!("skipping: mkvmerge or ffmpeg not available");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let (dir_a, dir_b) = (tmp.path().join("a"), tmp.path().join("b"));
+    tokio::fs::create_dir_all(&dir_a).await.unwrap();
+    tokio::fs::create_dir_all(&dir_b).await.unwrap();
+    let (a, b) = (make_sample(&dir_a).await, make_sample(&dir_b).await);
+    let runner = TokioProcessRunner::new(ToolPaths::default());
+    let originals = [probe(&runner, &a).await.unwrap(), probe(&runner, &b).await.unwrap()];
+
+    let edit = |input: usize, track_type: TrackType, name: &str, language: &str| {
+        let t = originals[input].tracks.iter().find(|t| t.track_type == track_type).unwrap();
+        MuxTrack {
+            input,
+            edit: TrackEdit {
+                id: t.id,
+                uid: t.uid,
+                track_type,
+                name: Some(name.into()),
+                language: Some(language.into()),
+                flags: TrackFlags { default: track_type != TrackType::Subtitles, ..TrackFlags::default() },
+            },
+        }
+    };
+    // Video and subtitles from A, audio from B, audio placed last.
+    let output = tmp.path().join("muxed.mkv");
+    let plan = MuxPlan {
+        inputs: vec![
+            MuxInput { source_path: a.to_string_lossy().into_owned(), remove_attachments: vec![] },
+            MuxInput { source_path: b.to_string_lossy().into_owned(), remove_attachments: vec![] },
+        ],
+        output_path: output.to_string_lossy().into_owned(),
+        tracks: vec![
+            edit(0, TrackType::Video, "Video A", "und"),
+            edit(0, TrackType::Subtitles, "Subs A", "en"),
+            edit(1, TrackType::Audio, "Telugu B", "te"),
+        ],
+    };
+    execute_mux(&runner, &originals, &plan, Box::new(|_: JobProgress| {})).await.expect("mux");
+
+    let muxed = probe(&runner, &output).await.expect("probe muxed output");
+    let tracks: Vec<(TrackType, Option<&str>)> =
+        muxed.tracks.iter().map(|t| (t.track_type, t.name.as_deref())).collect();
+    assert_eq!(
+        tracks,
+        [
+            (TrackType::Video, Some("Video A")),
+            (TrackType::Subtitles, Some("Subs A")),
+            (TrackType::Audio, Some("Telugu B")),
+        ]
+    );
+    assert!(a.exists() && b.exists(), "sources are untouched");
 }

@@ -194,6 +194,15 @@ export component AppBar inherits Rectangle {
                         clicked => { Bridge.open-requested(); }
                     }
                 }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: Icons.mux;
+                        enabled: !Bridge.loading;
+                        accessible-name: "Mux files into one";
+                        clicked => { Bridge.mux-requested(); }
+                    }
+                }
             }
         }
 

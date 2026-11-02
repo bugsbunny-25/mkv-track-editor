@@ -3,10 +3,11 @@
 //! in-process (spawned onto a background tokio runtime, never blocking the
 //! Slint UI thread) for analysis and remuxing.
 
-use mkv_core::{analyze, config_store, execute_plan, probe, TokioProcessRunner, ToolPaths};
+use mkv_core::{analyze, config_store, execute_mux, execute_plan, probe, TokioProcessRunner, ToolPaths};
 use mkv_profiles::AppConfig;
 use mkv_types::{
-    AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobProgress, ProbeResult, RemuxPlan, RootInfo, TrackEdit,
+    AttachmentInfo, DirListing, FileAnalysis, JobId, JobOutcome, JobProgress, MuxInput, MuxPlan, MuxTrack,
+    ProbeResult, RemuxPlan, RootInfo, TrackEdit,
 };
 use mkv_ui::{Backend, BackendCapabilities, ProgressCallback, SourceRef, UiCallback, UiError};
 use std::collections::HashMap;
@@ -15,9 +16,11 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
-struct PendingJob {
-    original: ProbeResult,
-    plan: RemuxPlan,
+/// A submitted job with the source probe results it's checked against,
+/// waiting for `watch_job` to start it.
+enum PendingJob {
+    Edit { original: ProbeResult, plan: RemuxPlan },
+    Mux { originals: Vec<ProbeResult>, plan: MuxPlan },
 }
 
 pub struct DesktopBackend {
@@ -158,7 +161,7 @@ impl Backend for DesktopBackend {
             // stale one from whenever the file was first opened.
             match probe(runner.as_ref(), Path::new(&plan.source_path)).await {
                 Ok(original) => {
-                    pending.lock().unwrap().insert(job_id.clone(), PendingJob { original, plan });
+                    pending.lock().unwrap().insert(job_id.clone(), PendingJob::Edit { original, plan });
                     deliver(cb, Ok(job_id));
                 }
                 Err(e) => deliver(cb, Err(UiError::new(e.to_string()))),
@@ -166,9 +169,48 @@ impl Backend for DesktopBackend {
         });
     }
 
+    fn submit_mux(
+        &self,
+        inputs: Vec<(SourceRef, Vec<AttachmentInfo>)>,
+        output: SourceRef,
+        tracks: Vec<MuxTrack>,
+        cb: UiCallback<JobId>,
+    ) {
+        let output_path = match local(output) {
+            Ok(o) => o,
+            Err(e) => return cb(Err(e)),
+        };
+        let mut mux_inputs = Vec::with_capacity(inputs.len());
+        for (source, remove_attachments) in inputs {
+            match local(source) {
+                Ok(source_path) => mux_inputs.push(MuxInput { source_path, remove_attachments }),
+                Err(e) => return cb(Err(e)),
+            }
+        }
+        let plan = MuxPlan { inputs: mux_inputs, output_path, tracks };
+
+        let runner = self.runner.clone();
+        let pending = self.pending.clone();
+        let job_id = JobId::new();
+        self.rt.spawn(async move {
+            // Validated against current probes, like `submit_job`.
+            let mut originals = Vec::with_capacity(plan.inputs.len());
+            for input in &plan.inputs {
+                match probe(runner.as_ref(), Path::new(&input.source_path)).await {
+                    Ok(original) => originals.push(original),
+                    Err(e) => return deliver(cb, Err(UiError::new(e.to_string()))),
+                }
+            }
+            if let Err(e) = mkv_core::mux::validate(&originals, &plan) {
+                return deliver(cb, Err(UiError::new(e.to_string())));
+            }
+            pending.lock().unwrap().insert(job_id.clone(), PendingJob::Mux { originals, plan });
+            deliver(cb, Ok(job_id));
+        });
+    }
+
     fn watch_job(&self, job: JobId, on_progress: ProgressCallback, on_done: UiCallback<JobOutcome>) {
-        let pending_job = self.pending.lock().unwrap().remove(&job);
-        let Some(PendingJob { original, plan }) = pending_job else {
+        let Some(pending_job) = self.pending.lock().unwrap().remove(&job) else {
             deliver(on_done, Err(UiError::new("unknown job")));
             return;
         };
@@ -188,10 +230,14 @@ impl Backend for DesktopBackend {
                 })
             };
 
-            let outcome = tokio::select! {
-                r = execute_plan(runner.as_ref(), &original, &plan, sink) => {
-                    r.map_err(|e| UiError::new(e.to_string()))
+            let work = async {
+                match &pending_job {
+                    PendingJob::Edit { original, plan } => execute_plan(runner.as_ref(), original, plan, sink).await,
+                    PendingJob::Mux { originals, plan } => execute_mux(runner.as_ref(), originals, plan, sink).await,
                 }
+            };
+            let outcome = tokio::select! {
+                r = work => r.map_err(|e| UiError::new(e.to_string())),
                 _ = cancel_token.cancelled() => Err(UiError::new("cancelled")),
             };
 
@@ -204,6 +250,21 @@ impl Backend for DesktopBackend {
         if let Some(token) = self.running.lock().unwrap().remove(&job) {
             token.cancel();
         }
+    }
+
+    fn delete_file(&self, source: SourceRef, cb: UiCallback<()>) {
+        let path = match local(source) {
+            Ok(p) => p,
+            Err(e) => return cb(Err(e)),
+        };
+        self.rt.spawn(async move {
+            let result = match tokio::fs::metadata(&path).await {
+                Ok(m) if !m.is_file() => Err(UiError::new("not a file")),
+                Ok(_) => tokio::fs::remove_file(&path).await.map_err(|e| UiError::new(e.to_string())),
+                Err(e) => Err(UiError::new(e.to_string())),
+            };
+            deliver(cb, result);
+        });
     }
 
     fn load_config(&self, cb: UiCallback<AppConfig>) {
