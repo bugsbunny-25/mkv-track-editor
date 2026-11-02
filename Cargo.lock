@@ -2824,7 +2824,7 @@ dependencies = [
 
 [[package]]
 name = "mkv-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "mkv-profiles",
@@ -2839,7 +2839,7 @@ dependencies = [
 
 [[package]]
 name = "mkv-desktop"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "directories",
  "mkv-core",
@@ -2856,7 +2856,7 @@ dependencies = [
 
 [[package]]
 name = "mkv-profiles"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "mkv-types",
  "regex",
@@ -2867,7 +2867,7 @@ dependencies = [
 
 [[package]]
 name = "mkv-server"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -2887,7 +2887,7 @@ dependencies = [
 
 [[package]]
 name = "mkv-types"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.4.3",
  "serde",
@@ -2897,7 +2897,7 @@ dependencies = [
 
 [[package]]
 name = "mkv-ui"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "mkv-profiles",
  "mkv-types",
@@ -2907,7 +2907,7 @@ dependencies = [
 
 [[package]]
 name = "mkv-volume"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "mkv-types",
  "tempfile",
@@ -2916,7 +2916,7 @@ dependencies = [
 
 [[package]]
 name = "mkv-web"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.4.3",
