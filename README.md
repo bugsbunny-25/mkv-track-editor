@@ -292,7 +292,7 @@ CI publishes a multi-arch (`linux/amd64`, `linux/arm64`) Alpine image to
 `ghcr.io/bugsbunny-25/mkv-track-editor`:
 
 - `:main` — the latest build of `main` (plus `:sha-<commit>` per commit).
-- `:latest` — the newest release: the highest `release/X.Y.Z` branch.
+- `:latest` — the newest release: the highest `vX.Y.Z`.
 - `:X.Y.Z` per release, and `:X.Y` for the newest patch of that minor
   version.
 
@@ -383,28 +383,37 @@ templates (including the missing-TMDb-ID case).
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs on pull requests and on pushes to `main` and
-`release/X.Y.Z` branches.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`, and
+for releases, when `.github/workflows/release.yml` calls it.
 
-| | Pull request | `main` | `release/X.Y.Z` |
+| | Pull request | `main` | Release `X.Y.Z` |
 |---|---|---|---|
 | `cargo test --workspace` (with real mkvmerge/mediainfo/ffmpeg) | ✓ | ✓ | ✓ |
 | Web build (wasm UI + server) | ✓ | ✓ | ✓ |
 | Desktop build: macOS arm64, Linux x86_64, Linux arm64 | ✓ | ✓ | ✓ |
 | Desktop archives kept as workflow artifacts | | ✓ | ✓ |
 | Alpine image for amd64 + arm64 pushed to GHCR | | `:main`, `:sha-…` | `:X.Y.Z`, plus `:X.Y` / `:latest` if it's the newest |
-| `vX.Y.Z` tag and GitHub release in this repository, with the desktop archives | | | ✓ |
+| GitHub release in this repository with the desktop archives, which creates the `vX.Y.Z` tag | | | ✓ |
 | GitHub release + cask (macOS) and formula (Linux) in the Homebrew tap, then install-tested with `brew` on macOS and Linux | | | ✓ |
 
-**Cutting a release:** bump `version` in the root `Cargo.toml` to `X.Y.Z`
-on `main`, then push a `release/X.Y.Z` branch. The run fails early if the
-branch name and `Cargo.toml` disagree. Pushing fixes to the same branch
-republishes `X.Y.Z` (the `vX.Y.Z` tag moves to the new commit; the image
-tags, release archives and cask/formula checksums are replaced). A fix
-pushed to an older release branch (say `release/0.1.4` after
-`release/0.2.0` exists) publishes `:0.1.4`, its release and archives, but
-leaves `:latest`, `:0.1` (if `0.1.5` exists), the "latest" release and the
-Homebrew cask and formula alone.
+**Cutting a release:** run the **Release** workflow by hand (Actions →
+Release → Run workflow, or `gh workflow run release.yml -f version=X.Y.Z`)
+with the version to release. It:
+
+1. Checks that `main` is green: its latest CI run succeeded (tests, builds
+   and both images), and only `[skip ci]` version bumps came after it.
+2. Checks that `X.Y.Z` is the next patch, minor or major version after the
+   highest `vX.Y.Z` tag.
+3. If `Cargo.toml` isn't on `X.Y.Z` yet, bumps it on `main` in a
+   `Bump version to X.Y.Z [skip ci]` commit, so `main`'s CI doesn't run
+   again.
+4. Builds and publishes that commit with `ci.yml`: image tags, then the
+   GitHub release, created as a draft, given the archives and then
+   published, which creates the `vX.Y.Z` tag, then the Homebrew tap.
+
+If a release run fails partway, re-run its failed jobs from its page: it
+releases the same version from the same commit, reusing the draft or
+release and replacing its archives.
 
 Linux desktop binaries are built on Ubuntu 22.04, so they need glibc 2.35+,
 the same minimum as Homebrew on Linux. Each architecture's image is built on
@@ -419,5 +428,10 @@ a native runner, and the two are then merged into one multi-arch tag.
 - Repository secret `HOMEBREW_TAP_TOKEN`: a fine-grained personal access
   token limited to `bugsbunny-25/homebrew-tap` with **Contents: Read and
   write**.
+- Repository secret `RELEASE_TOKEN`: a fine-grained personal access token
+  of a repository admin, limited to this repository, with **Contents: Read
+  and write**. The release workflow pushes the version bump to `main` with
+  it: `main`'s branch protection requires CI checks that a `[skip ci]`
+  commit never gets, and only admins may push past them.
 - Images, the `vX.Y.Z` tag and this repository's release use the
-  workflow's own `GITHUB_TOKEN`; nothing else is needed.
+  workflow's own `GITHUB_TOKEN`.

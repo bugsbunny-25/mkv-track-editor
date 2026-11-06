@@ -1,0 +1,184 @@
+name: Release
+
+# Cuts a release from main. Start it by hand: Actions → Release → Run
+# workflow, entering the version (X.Y.Z), or
+#   gh workflow run release.yml -f version=X.Y.Z
+#
+# 1. main must be green: its latest CI run (tests, builds and both images)
+#    succeeded, and only "[skip ci]" version bumps came after it.
+# 2. The version must be the next one after the highest vX.Y.Z tag: its
+#    next patch, minor or major version. If Cargo.toml has another version,
+#    it's bumped on main in a "[skip ci]" commit, so main's CI doesn't run
+#    again for it.
+# 3. ci.yml builds that commit and publishes it: image tags, the GitHub
+#    release (publishing it creates the vX.Y.Z tag) and Homebrew.
+#
+# A failed run can be re-run from its page ("Re-run failed jobs"): it
+# releases the same version from the same commit.
+#
+# Needs the repository secret RELEASE_TOKEN: a fine-grained personal access
+# token of a repository admin, limited to this repository, with Contents:
+# Read and write. main's branch protection requires CI checks that a
+# "[skip ci]" commit never gets; admins may push past them, the workflow's
+# own GITHUB_TOKEN may not.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release (X.Y.Z), the next patch, minor or major version after the latest release
+        type: string
+        required: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.bump.outputs.sha }}
+    steps:
+      - name: Check how the release was started
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Releases are cut from main; this run was started on $GITHUB_REF"
+            exit 1
+          fi
+          if [[ -z "$RELEASE_TOKEN" ]]; then
+            echo "::error::The repository secret RELEASE_TOKEN is missing (see the header of release.yml)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Check that main is green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list --workflow ci.yml --branch main --event push --limit 1 \
+            --json headSha,status,conclusion,url --jq '.[0] // empty')
+          if [[ -z "$run" ]]; then
+            echo "::error::main has no CI run"
+            exit 1
+          fi
+          run_sha=$(jq -r .headSha <<< "$run")
+          status=$(jq -r .status <<< "$run")
+          conclusion=$(jq -r .conclusion <<< "$run")
+          url=$(jq -r .url <<< "$run")
+          if [[ "$status" != completed ]]; then
+            echo "::error::main's CI run $url is still $status; release once it's green"
+            exit 1
+          fi
+          if [[ "$conclusion" != success ]]; then
+            echo "::error::main's CI run $url ended in $conclusion"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$run_sha" HEAD; then
+            echo "::error::main's last CI run ($run_sha) is not in main's history"
+            exit 1
+          fi
+          # Commits after the green run must be version bumps that skipped CI.
+          for commit in $(git rev-list "$run_sha..HEAD"); do
+            subject=$(git log -1 --format=%s "$commit")
+            merge=false
+            git rev-parse -q --verify "$commit^2" >/dev/null && merge=true
+            others=$(git diff-tree --no-commit-id --name-only -r "$commit" \
+              | grep -v -x -e Cargo.toml -e Cargo.lock || true)
+            if [[ "$merge" == true || "$subject" != *"[skip ci]"* || -n "$others" ]]; then
+              echo "::error::$commit ($subject) is on main but CI hasn't run on it; wait for main's CI"
+              exit 1
+            fi
+          done
+          echo "main is green: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - id: version
+        name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          VERSION=${VERSION#v}
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Version must look like X.Y.Z, not \"$VERSION\""
+            exit 1
+          fi
+          latest=$(git tag -l 'v*' | sed -n 's/^v\([0-9]*\.[0-9]*\.[0-9]*\)$/\1/p' | sort -V | tail -n 1)
+          latest=${latest:-0.0.0}
+          IFS=. read -r major minor patch <<< "$latest"
+          next_patch="$major.$minor.$((patch + 1))"
+          next_minor="$major.$((minor + 1)).0"
+          next_major="$((major + 1)).0.0"
+          if [[ "$VERSION" != "$next_patch" && "$VERSION" != "$next_minor" && "$VERSION" != "$next_major" ]]; then
+            echo "::error::$VERSION doesn't follow the latest release $latest; use $next_patch, $next_minor or $next_major"
+            exit 1
+          fi
+          cargo_version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "mkv-desktop") | .version')
+          bump=false
+          [[ "$cargo_version" != "$VERSION" ]] && bump=true
+          {
+            echo "version=$VERSION"
+            echo "cargo-version=$cargo_version"
+            echo "bump=$bump"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION after $latest (Cargo.toml has $cargo_version)" >> "$GITHUB_STEP_SUMMARY"
+
+      - id: bump
+        name: Bump the version on main
+        env:
+          CARGO_VERSION: ${{ steps.version.outputs.cargo-version }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUMP: ${{ steps.version.outputs.bump }}
+        run: |
+          if [[ "$BUMP" == true ]]; then
+            sed -i -E '/^\[workspace\.package\]/,/^\[/ s/^version = "[^"]*"$/version = "'"$VERSION"'"/' Cargo.toml
+            cargo update --workspace --quiet
+            cargo_version=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.name == "mkv-desktop") | .version')
+            if [[ "$cargo_version" != "$VERSION" ]]; then
+              echo "::error::Bumping Cargo.toml to $VERSION left the workspace on $cargo_version"
+              exit 1
+            fi
+            # Only the workspace crates' versions may change.
+            unexpected=$(git diff -U0 -- Cargo.toml Cargo.lock | grep '^[-+][^-+]' \
+              | grep -v -x -e "-version = \"$CARGO_VERSION\"" -e "+version = \"$VERSION\"" || true)
+            if [[ -n "$unexpected" || -n "$(git status --porcelain -- ':!Cargo.toml' ':!Cargo.lock')" ]]; then
+              echo "::error::The version bump changed more than the workspace version:"
+              echo "$unexpected"
+              exit 1
+            fi
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                commit -q -m "Bump version to $VERSION [skip ci]" -- Cargo.toml Cargo.lock
+            # Fails if main moved since the checks above.
+            git push origin HEAD:refs/heads/main
+            echo "Bumped Cargo.toml to $VERSION on main" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and publish
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      ref: ${{ needs.prepare.outputs.sha }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    permissions:
+      contents: write
+      packages: write

@@ -3,17 +3,30 @@ name: CI
 # Pull requests: tests + web and desktop builds (nothing is kept).
 # main:          the same, plus desktop archives (workflow artifacts) and the
 #                multi-arch Alpine image tagged :main and :sha-<commit>.
-# release/X.Y.Z: the same, plus image tags :X.Y.Z, :X.Y and :latest, a vX.Y.Z
-#                tag and GitHub release in this repository, a GitHub release
+# Release:       called by release.yml with a version and the commit to build:
+#                the same, plus image tags :X.Y.Z, :X.Y and :latest, a GitHub
+#                release and vX.Y.Z tag in this repository, a GitHub release
 #                in the public Homebrew tap repository and an updated tap
 #                cask (macOS) and formula (Linux). X.Y.Z must match
-#                Cargo.toml's version.
+#                Cargo.toml's version at that commit.
 on:
   pull_request:
   push:
     branches:
       - main
-      - "release/**"
+  workflow_call:
+    inputs:
+      version:
+        description: Version to release (X.Y.Z); must match Cargo.toml at `ref`
+        required: true
+        type: string
+      ref:
+        description: Commit to build and release
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,38 +55,48 @@ jobs:
       cargo-version: ${{ steps.version.outputs.cargo-version }}
       publish: ${{ steps.version.outputs.publish }}
       release: ${{ steps.version.outputs.release }}
+      # A push to main (:main and :sha-<commit> image tags).
+      main: ${{ steps.version.outputs.main }}
+      # The commit being built (the release commit, for a release).
+      sha: ${{ steps.version.outputs.sha }}
       # This release is the highest X.Y.Z overall / within its X.Y, so it
-      # moves :latest (and the Homebrew cask and formula) / :X.Y. A fix pushed to an
-      # older release branch doesn't move them back.
+      # moves :latest (and the Homebrew cask and formula) / :X.Y. Releasing
+      # an older version doesn't move them back.
       latest: ${{ steps.version.outputs.latest }}
       latest-minor: ${{ steps.version.outputs.latest-minor }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
       - id: version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           cargo_version=$(cargo metadata --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "mkv-desktop") | .version')
           publish=false
           release=false
+          main=false
           latest=false
           latest_minor=false
           version="$cargo_version"
-          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == release/* ]]; then
-            branch_version=${GITHUB_REF_NAME#release/}
-            if [[ "$branch_version" != "$cargo_version" ]]; then
-              echo "::error::Branch $GITHUB_REF_NAME does not match the workspace version $cargo_version in Cargo.toml"
+          if [[ -n "$RELEASE_VERSION" ]]; then
+            if [[ "$RELEASE_VERSION" != "$cargo_version" ]]; then
+              echo "::error::Release $RELEASE_VERSION does not match the workspace version $cargo_version in Cargo.toml"
               exit 1
             fi
             publish=true
             release=true
-            releases=$(git ls-remote --heads origin 'release/*' \
-              | sed -n 's#.*refs/heads/release/\([0-9]*\.[0-9]*\.[0-9]*\)$#\1#p')
+            # Released versions are the vX.Y.Z tags; this one isn't tagged yet.
+            releases=$( { git ls-remote --tags origin 'v*' \
+              | sed -n 's#.*refs/tags/v\([0-9]*\.[0-9]*\.[0-9]*\)$#\1#p'; echo "$cargo_version"; } )
             highest() { sort -V | tail -n 1; }
             [[ "$cargo_version" == "$(highest <<< "$releases")" ]] && latest=true
             same_minor=$(awk -F. -v v="$cargo_version" 'BEGIN { split(v, c, ".") } $1 == c[1] && $2 == c[2]' <<< "$releases")
             [[ "$cargo_version" == "$(highest <<< "$same_minor")" ]] && latest_minor=true
           elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == main ]]; then
             publish=true
+            main=true
             version="${cargo_version}-main.${GITHUB_SHA::7}"
           fi
           {
@@ -81,6 +104,8 @@ jobs:
             echo "version=$version"
             echo "publish=$publish"
             echo "release=$release"
+            echo "main=$main"
+            echo "sha=$(git rev-parse HEAD)"
             echo "latest=$latest"
             echo "latest-minor=$latest_minor"
           } >> "$GITHUB_OUTPUT"
@@ -91,6 +116,8 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
       # mkvtoolnix, mediainfo and ffmpeg let mkv-core's real-binary
       # integration tests run instead of skipping.
       - run: |
@@ -106,6 +133,8 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -137,6 +166,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -174,6 +205,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -183,6 +216,9 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
+          # Labels describe the checked-out commit (the release commit, for a
+          # release), not the commit that started the workflow.
+          context: git
           images: ${{ env.IMAGE }}
       # Each architecture builds natively on its own runner and is pushed by
       # digest only; the manifest job below tags the combined image.
@@ -232,8 +268,8 @@ jobs:
           images: ${{ env.IMAGE }}
           flavor: latest=false
           tags: |
-            type=raw,value=main,enable=${{ github.ref_name == 'main' }}
-            type=sha,prefix=sha-,enable=${{ github.ref_name == 'main' }}
+            type=raw,value=main,enable=${{ needs.meta.outputs.main == 'true' }}
+            type=sha,prefix=sha-,enable=${{ needs.meta.outputs.main == 'true' }}
             type=semver,pattern={{version}},value=${{ needs.meta.outputs.cargo-version }},enable=${{ needs.meta.outputs.release == 'true' }}
             type=semver,pattern={{major}}.{{minor}},value=${{ needs.meta.outputs.cargo-version }},enable=${{ needs.meta.outputs.latest-minor == 'true' }}
             type=raw,value=latest,enable=${{ needs.meta.outputs.latest == 'true' }}
@@ -257,21 +293,27 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: mkv-track-editor-*
           merge-multiple: true
-      # Pushing to the same release branch again republishes this version,
-      # so the tag follows the branch. A tag push doesn't start this
-      # workflow (it only runs for branches).
-      - name: Tag the release commit
-        run: |
-          git tag -f "v$VERSION" "$GITHUB_SHA"
-          git push -f origin "refs/tags/v$VERSION"
-      - name: Publish the release
+      # The release is created as a draft, gets the archives, and is then
+      # published, which creates the vX.Y.Z tag on the release commit. Safe
+      # to re-run: an existing draft or release is reused and its archives
+      # replaced.
+      - name: Publish the release and tag it
+        env:
+          SHA: ${{ needs.meta.outputs.sha }}
         run: |
           tag="v$VERSION"
+          tagged=$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)
+          if [[ -n "$tagged" && "$tagged" != "$SHA" ]]; then
+            echo "::error::Tag $tag already exists on $tagged, not on the release commit $SHA"
+            exit 1
+          fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
             cat > "$RUNNER_TEMP/notes.md" <<EOF
           ## Install
@@ -281,13 +323,17 @@ jobs:
           - Docker: \`docker pull $IMAGE:$VERSION\`
 
           EOF
-            gh release create "$tag" --verify-tag \
-              --latest="${{ needs.meta.outputs.latest }}" \
+            gh release create "$tag" --draft --target "$SHA" \
               --title "MKV Track Editor $VERSION" \
               --notes-file "$RUNNER_TEMP/notes.md" \
               --generate-notes
           fi
           gh release upload "$tag" --clobber dist/*.tar.gz dist/*.sha256
+          if [[ "$(gh release view "$tag" --json isDraft -q .isDraft)" == true ]]; then
+            gh release edit "$tag" --draft=false --latest="${{ needs.meta.outputs.latest }}"
+          fi
+          git fetch --quiet origin "refs/tags/$tag:refs/tags/$tag"
+          [[ "$(git rev-parse "$tag^{commit}")" == "$SHA" ]]
 
   homebrew:
     name: Homebrew release
@@ -300,6 +346,8 @@ jobs:
       GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -314,7 +362,7 @@ jobs:
               --title "MKV Track Editor $VERSION" \
               --notes "Desktop builds of MKV Track Editor $VERSION. Install with \`brew install --cask $TAP/mkv-track-editor\` (macOS) or \`brew install $TAP/mkv-track-editor\` (Linux). Docker: \`$IMAGE:$VERSION\`."
           fi
-          # Pushing to the same release branch again republishes this version.
+          # Re-running the release replaces the archives.
           gh release upload "$tag" --repo "$TAP_REPO" --clobber dist/*.tar.gz dist/*.sha256
       - name: Render cask and formula
         run: |
