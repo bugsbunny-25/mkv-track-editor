@@ -136,6 +136,12 @@ export component TextArea {
         clip: true;
 
         scroll := ScrollView {
+            // A ScrollView only sizes its content from a layout child, so a
+            // bare TextInput never made it scrollable: size the content from
+            // the input and its padding (as std-widgets' TextEdit does).
+            content-width: input.width + 2 * input.x;
+            content-height: input.height + 2 * input.y;
+
             input := TextInput {
                 x: Theme.space-3 - Theme.border-width;
                 y: Theme.space-2;
