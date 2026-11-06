@@ -61,7 +61,8 @@ pub struct NamingMetadata {
     pub imdb_id: String,
     pub tvdb_id: String,
     pub edition: String,
-    /// Space-separated custom format names.
+    /// Space-separated custom format names, including the streaming
+    /// service's tag (e.g. `Hybrid AMZN`).
     pub custom_formats: String,
     pub source: QualitySource,
     pub revision: Revision,
@@ -100,13 +101,30 @@ impl NamingMetadata {
     }
 }
 
+/// The custom formats whose patterns match `file_name`, followed by the
+/// streaming service's tag (as Radarr lists a service's custom format).
 pub fn detect_custom_formats(naming: &NamingConfig, file_name: &str) -> Vec<String> {
-    naming
+    let mut found: Vec<String> = naming
         .custom_formats
         .iter()
         .filter(|cf| Regex::new(&cf.pattern).is_ok_and(|re| re.is_match(file_name)))
         .map(|cf| cf.name.clone())
-        .collect()
+        .collect();
+    if let Some(tag) = detect_streaming_service(naming, file_name) {
+        if !found.contains(&tag) {
+            found.push(tag);
+        }
+    }
+    found
+}
+
+/// The tag of the first streaming-service rule that matches `file_name`.
+pub fn detect_streaming_service(naming: &NamingConfig, file_name: &str) -> Option<String> {
+    naming
+        .streaming_services
+        .iter()
+        .find(|s| s.regex().is_ok_and(|re| re.is_match(file_name).unwrap_or(false)))
+        .map(|s| s.tag.trim().to_string())
 }
 
 /// Media facts for the `{MediaInfo ...}` tokens, computed from the tracks
@@ -392,6 +410,53 @@ mod tests {
             name,
             "Mission Impossible – Dead Reckoning Part One (2023) [tmdbid-575264] - Director's Cut [IMAX Enhanced Hybrid][WEBDL-2160p][DV HDR10][TrueHD Atmos 7.1][h265]-FLUX.mkv"
         );
+    }
+
+    #[test]
+    fn streaming_service_is_added_to_custom_formats() {
+        let naming = NamingConfig::default();
+        let detect = |name: &str| detect_streaming_service(&naming, name);
+        let cases = [
+            ("Movie.2023.2160p.AMZN.WEB-DL.DDP5.1.H.265-GRP.mkv", Some("AMZN")),
+            ("Show.S01E01.1080p.NF.WEB-DL.mkv", Some("NF")),
+            ("Movie.2023.1080p.ATVP.WEB-DL.mkv", Some("ATVP")),
+            ("Movie.2023.1080p.ATV.WEB-DL.mkv", Some("ATV")),
+            ("Movie.2021.2160p.HMAX.WEB-DL.mkv", Some("HMAX")),
+            ("Movie.2021.2160p.HBO.MAX.WEB-DL.mkv", Some("HMAX")),
+            ("Movie.2021.1080p.HBO.WEB-DL.mkv", Some("HBO")),
+            ("Movie.2024.2160p.MAX.WEB-DL.mkv", Some("MAX")),
+            ("Movie.2019.1080p.iT.WEB-DL.mkv", Some("iT")),
+            ("Movie.2019.1080p.MA.WEB-DL.mkv", Some("MA")),
+            ("Movie.2019.1080p.Hulu.WEB-DL.mkv", Some("Hulu")),
+            ("Show.S01E01.1080p.iP.WEB-DL.mkv", Some("IP")),
+            ("Show.S01E01.1080p.ITV.WEB-DL.mkv", Some("ITVX")),
+            ("Show.S01E01.1080p.ITVX.WEB-DL.mkv", Some("ITVX")),
+            ("Show.S01E01.1080p.MY5.WEB-DL.mkv", Some("MY5")),
+            ("Show.S01E01.1080p.NOW.WEB-DL.mkv", Some("NOW")),
+            ("Apocalypse.Now.1979.2160p.BluRay.mkv", None),
+            ("Movie.2024.Telugu.1080p.JHS.WEB-DL.mkv", Some("HTSR")),
+            ("Movie.2024.Telugu.1080p.JioHotstar.WEB-DL.mkv", Some("HTSR")),
+            ("Movie.2022.Telugu.1080p.HS.WEB-DL.mkv", Some("HTSR")),
+            ("Movie.2022.Telugu.1080p.Hotstar.WEB-DL.mkv", Some("HTSR")),
+            ("Movie.2024.Telugu.1080p.SLIV.WEB-DL.mkv", Some("SONYLIV")),
+            ("Movie.2024.Tamil.1080p.SNXT.WEB-DL.mkv", Some("SUNNXT")),
+            ("Movie.2024.Telugu.1080p.AHA.WEB-DL.mkv", Some("AHA")),
+            // Already named by us: `[TAG]` / `[... TAG]`.
+            ("Movie (2024) - [MAX][WEBDL-2160p].mkv", Some("MAX")),
+            ("Movie (2024) - [Hybrid iT][WEBDL-1080p].mkv", Some("iT")),
+            // Titles and audio that look like services don't count.
+            ("Mad.Max.Fury.Road.2015.2160p.BluRay.mkv", None),
+            ("It.2017.2160p.BluRay.mkv", None),
+            ("Movie.2019.2160p.BluRay.REMUX.DTS-HD.MA.5.1-GRP.mkv", None),
+        ];
+        for (name, tag) in cases {
+            assert_eq!(detect(name).as_deref(), tag, "{name}");
+        }
+
+        let meta = NamingMetadata::from_file_name("Movie.2023.Hybrid.2160p.AMZN.WEB-DL.DV.mkv", &naming);
+        assert_eq!(meta.custom_formats, "Hybrid AMZN");
+        let name = render_file_name(&naming, &meta, &summary()).unwrap().text;
+        assert_eq!(name, "Movie (2023) - [Hybrid AMZN][WEBDL-2160p][DV HDR10][TrueHD Atmos 7.1][h265].mkv");
     }
 
     #[test]

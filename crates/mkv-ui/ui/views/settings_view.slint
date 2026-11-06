@@ -162,6 +162,16 @@ component SettingsForm inherits VerticalLayout {
                 edited => { Bridge.s-edited(); }
             }
         }
+        FormField {
+            label: "Streaming services";
+            hint: "One rule per line: TAG = regex, matched case-insensitively against the source file name like Radarr (look-around works, so TRaSH Guides regexes can be pasted as they are). Several lines may share a TAG. The first matching line wins and its TAG (AMZN, NF, HMAX, …) is added to {Custom Formats}.";
+            TextArea {
+                height: 120px;
+                wrap: no-wrap;
+                text <=> Bridge.s-streaming-services;
+                edited => { Bridge.s-edited(); }
+            }
+        }
     }
 }
 

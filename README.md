@@ -118,6 +118,22 @@ tracks you **keep** (the first kept audio track is the "primary" one), so
 names stay parseable by Radarr/Sonarr. Custom formats are `Name = regex` rules
 matched against the source file name.
 
+**Streaming services** (Settings → File naming) are `TAG = regex` rules, one
+per line, matched case-insensitively against the source file name as Radarr
+does. Look-around (`(?=…)`, `(?<!…)`) works, so regexes from the
+[TRaSH Guides](https://trash-guides.info/Radarr/Radarr-collection-of-custom-formats/#streaming-services-general)
+can be pasted as they are, and several lines may share a tag (a custom
+format's alternative conditions). The first matching line adds its tag to
+`{Custom Formats}`, as Radarr does with streaming-service custom formats:
+`Movie.2023.2160p.AMZN.WEB-DL…` → `Movie (2023) - [AMZN][WEBDL-2160p]…`.
+
+The defaults are TRaSH's "Streaming Services General" formats (AMZN, ATV,
+ATVP, BCORE, CRiT, DSNP, PLAY, HBO, HMAX, Hulu, IMF, iT, MAX, MA, NF, PMTP,
+PCOK, ROKU, STAN) and "UK Streaming Services" formats (IP, ITVX, MY5, NOW)
+with their regexes unchanged (their WEB-DL/WEBRip source conditions are not
+checked), followed by CRAV, HTSR (Hotstar and JioHotstar/JHS), JC, ZEE5, SONYLIV
+(SLIV), SUNNXT (SNXT) and AHA.
+
 ## Workspace layout
 
 ```

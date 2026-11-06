@@ -11,4 +11,7 @@ mkv-types.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 regex = "1"
+# Streaming-service rules use TRaSH Guides / Radarr regexes verbatim, which
+# need look-around (`(?=…)`, `(?<!…)`) that `regex` doesn't support.
+fancy-regex = "0.20"
 toml = "1"

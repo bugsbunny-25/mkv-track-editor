@@ -1,9 +1,9 @@
 //! Conversions between `AppConfig` and the Settings tab's compact text
-//! fields (one audio rule / custom format per line), plus the live preview.
+//! fields (one audio rule / custom format / streaming service per line), plus the live preview.
 //! Pure logic, unit-tested without Slint.
 
 use crate::document::Document;
-use mkv_profiles::config::{AudioRule, CustomFormat, NamingConfig, SubtitleKind};
+use mkv_profiles::config::{AudioRule, CustomFormat, NamingConfig, StreamingService, SubtitleKind};
 use mkv_profiles::template::ColonReplacement;
 use mkv_profiles::{apply_profile, render_file_name, summarize, AppConfig, Profile};
 use mkv_types::TrackType;
@@ -37,6 +37,7 @@ pub struct NamingForm {
     pub episode_format: String,
     pub colon_index: usize,
     pub custom_formats: String,
+    pub streaming_services: String,
 }
 
 fn list_to_text(items: &[String]) -> String {
@@ -98,6 +99,29 @@ pub fn custom_formats_from_text(text: &str) -> Result<Vec<CustomFormat>, String>
                 .ok_or_else(|| format!("custom format line {n}: expected `Name = regex`"))?;
             Ok(CustomFormat {
                 name: name.trim().to_string(),
+                pattern: pattern.trim().to_string(),
+            })
+        })
+        .collect()
+}
+
+/// `TAG = regex` per line; the first matching line wins.
+pub fn streaming_services_to_text(services: &[StreamingService]) -> String {
+    services
+        .iter()
+        .map(|s| format!("{} = {}", s.tag, s.pattern))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn streaming_services_from_text(text: &str) -> Result<Vec<StreamingService>, String> {
+    meaningful_lines(text)
+        .map(|(n, line)| {
+            let (tag, pattern) = line
+                .split_once('=')
+                .ok_or_else(|| format!("streaming service line {n}: expected `TAG = regex`"))?;
+            Ok(StreamingService {
+                tag: tag.trim().to_string(),
                 pattern: pattern.trim().to_string(),
             })
         })
@@ -177,6 +201,7 @@ pub fn naming_to_form(n: &NamingConfig) -> NamingForm {
             .position(|(c, _)| *c == n.colon_replacement)
             .unwrap_or(0),
         custom_formats: custom_formats_to_text(&n.custom_formats),
+        streaming_services: streaming_services_to_text(&n.streaming_services),
     }
 }
 
@@ -186,6 +211,7 @@ pub fn form_to_naming(form: &NamingForm) -> Result<NamingConfig, String> {
         episode_format: form.episode_format.clone(),
         colon_replacement: COLON_OPTIONS.get(form.colon_index).map(|(c, _)| *c).unwrap_or_default(),
         custom_formats: custom_formats_from_text(&form.custom_formats)?,
+        streaming_services: streaming_services_from_text(&form.streaming_services)?,
     })
 }
 
@@ -275,5 +301,16 @@ mod tests {
         let cfs = custom_formats_from_text("Weird = (?i)a=b").unwrap();
         assert_eq!(cfs[0].name, "Weird");
         assert_eq!(cfs[0].pattern, "(?i)a=b");
+    }
+
+    #[test]
+    fn streaming_services_parse_tag_and_regex() {
+        let services = streaming_services_from_text("# comment\nAMZN = (?i)\\b(amzn|amazon)\\b\n\nNF = a=b").unwrap();
+        assert_eq!(services.len(), 2);
+        assert_eq!(services[0].tag, "AMZN");
+        assert_eq!(services[0].pattern, r"(?i)\b(amzn|amazon)\b");
+        assert_eq!(services[1].pattern, "a=b");
+        let err = streaming_services_from_text("AMZN").unwrap_err();
+        assert!(err.contains("line 1"), "{err}");
     }
 }
