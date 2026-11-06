@@ -1605,6 +1605,7 @@ fn sync_settings_form(b: &Bridge, st: &State) {
     b.set_s_episode_format(n.episode_format.into());
     b.set_s_colon_index(n.colon_index as i32);
     b.set_s_custom_formats(n.custom_formats.into());
+    b.set_s_streaming_services(n.streaming_services.into());
 }
 
 fn sync_settings_status(b: &Bridge, st: &State) {
@@ -1648,6 +1649,7 @@ fn read_settings_form(b: &Bridge, st: &mut State) {
         episode_format: b.get_s_episode_format().to_string(),
         colon_index: b.get_s_colon_index().max(0) as usize,
         custom_formats: b.get_s_custom_formats().to_string(),
+        streaming_services: b.get_s_streaming_services().to_string(),
     };
     match settings::form_to_naming(&naming) {
         Ok(n) => s.draft.naming = n,

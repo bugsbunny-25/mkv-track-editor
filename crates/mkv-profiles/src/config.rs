@@ -203,6 +203,26 @@ pub struct CustomFormat {
     pub pattern: String,
 }
 
+/// One rule for recognising a streaming service in the source file name,
+/// like a Radarr/Sonarr custom format (`AMZN`, `NF`, `HMAX`, …). Several
+/// rules may share a tag (a custom format's alternative conditions). The
+/// first rule that matches adds its `tag` to `{Custom Formats}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StreamingService {
+    /// The text written into the file name, e.g. `AMZN`.
+    pub tag: String,
+    /// Regex matched against the original file name, case-insensitively
+    /// as Radarr does. Look-around is supported, so TRaSH Guides regexes
+    /// can be used as they are.
+    pub pattern: String,
+}
+
+impl StreamingService {
+    pub fn regex(&self) -> Result<fancy_regex::Regex, fancy_regex::Error> {
+        fancy_regex::RegexBuilder::new(&self.pattern).case_insensitive(true).build()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NamingConfig {
@@ -210,6 +230,7 @@ pub struct NamingConfig {
     pub episode_format: String,
     pub colon_replacement: ColonReplacement,
     pub custom_formats: Vec<CustomFormat>,
+    pub streaming_services: Vec<StreamingService>,
 }
 
 pub const DEFAULT_MOVIE_FORMAT: &str = "{Movie CleanTitle} {(Release Year)} [tmdbid-{TmdbId}] - {Edition Tags }{[Custom Formats]}{[Quality Full]}{[MediaInfo 3D]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[Mediainfo VideoCodec]}{-Release Group}";
@@ -229,8 +250,71 @@ impl Default for NamingConfig {
                 cf("IMAX Enhanced", r"(?i)\bimax[ ._-]?enhanced\b"),
                 cf("Hybrid", r"(?i)\bhybrid\b"),
             ],
+            streaming_services: default_streaming_services(),
         }
     }
+}
+
+/// TRaSH Guides' "Streaming Services General" and "UK Streaming Services"
+/// custom formats for Radarr, in the guide's order, one rule per
+/// release-title condition with the regex unchanged (their WEBDL/WEBRIP
+/// source conditions, and CRiT's "not the Criterion group" condition, are
+/// left out). Then services the guide files elsewhere or doesn't have,
+/// mostly Indian ones; CRAV and HTSR are TRaSH's own regexes from other
+/// sections.
+pub fn default_streaming_services() -> Vec<StreamingService> {
+    [
+        // TRaSH Guides: Streaming Services General.
+        ("AMZN", r"\b(amzn|amazon(hd)?)\b"),
+        ("ATV", r"\b(ATV)\b"),
+        ("ATVP", r"\b(atvp|aptv|Apple TV\+)\b"),
+        ("BCORE", r"\b(BCORE)\b|\b(\d{3,4}(p|i))\b.*\b(CORE)\b"),
+        ("CRiT", r"\b(CRiT)\b"),
+        ("DSNP", r"\b(dsnp|dsny|disney|Disney\+)\b"),
+        ("PLAY", r"\b(Play)\b(?=[ ._-]web[ ._-]?(dl|rip)\b)"),
+        ("PLAY", r"\[(Play)\b|\b(Play)\]"),
+        ("HBO", r"\b(hbo)(?![ ._-]max)\b(?=[ ._-]web[ ._-]?(dl|rip)\b)"),
+        ("HBO", r"\[(HBO)\b|\b(HBO)\]"),
+        ("HMAX", r"\b(hmax|hbom|hbo[ ._-]?max)\b(?=[ ._-]web[ ._-]?(dl|rip)\b)"),
+        ("HMAX", r"\[(HMAX)\b|\b(HMAX)\]"),
+        ("Hulu", r"\b(hulu)\b"),
+        ("IMF", r"(\b(IMF)\b(?=.*\b(web[ ._-]?rip))\b)"),
+        ("iT", r"\b(it|itunes)\b(?=[ ._-]web[ ._-]?(dl|rip)\b)"),
+        ("iT", r"\[(iT)(?![+])\b|\b(?<![+])(iT)\]"),
+        ("MAX", r"\b((?<!hbo[ ._-])max)\b(?=[ ._-]web[ ._-]?(dl|rip)\b)"),
+        ("MAX", r"\[(MAX)\b|\b(MAX)\]"),
+        ("MA", r"(?<!dts[ .-]?hd[ .-]?)\b(ma|ykw)\b(?=.*\bweb[ ._-]?(dl|rip)\b)"),
+        ("NF", r"\b(nf|netflix(u?hd)?)\b"),
+        ("PMTP", r"\b(pmtp|Paramount Plus)\b"),
+        ("PCOK", r"\b(pcok|peacock)\b"),
+        ("ROKU", r"\b(ROKU)\b"),
+        ("STAN", r"\b(stan)\b[ ._-]web[ ._-]?(dl|rip)?\b"),
+        ("STAN", r"\[(STAN)\b|\b(STAN)\]"),
+        // TRaSH Guides: UK Streaming Services.
+        ("IP", r"\b(ip|iplayer)\b"),
+        ("ITVX", r"\b(ITVX?)\b[ ._-]web[ ._-]?(dl|rip)?\b"),
+        ("ITVX", r"\[(ITVX)\b|\b(ITVX)\]"),
+        ("MY5", r"\b(MY5)\b"),
+        ("NOW", r"\b(now)\b[ ._-]web[ ._-]?(dl|rip)?\b"),
+        ("NOW", r"\[(NOW)\b|\b(NOW)\]"),
+        // Others.
+        ("CRAV", r"\b(crav(e)?)\b[ ._-]web[ ._-]?(dl|rip)?\b"),
+        ("CRAV", r"\[(CRAV)\b|\b(CRAV)\]"),
+        // Hotstar, renamed JioHotstar (JHS) in 2025: one service, one tag.
+        ("HTSR", r"\b(HTSR|DSNPHS|HS)\b"),
+        ("HTSR", r"\b(jhs|hotstar|jio[ ._-]?hotstar)\b"),
+        ("JC", r"\b(jc)\b[ ._-]web[ ._-]?(dl|rip)?\b"),
+        ("JC", r"\[(JC)\b|\b(JC)\]"),
+        ("JC", r"\b(jio[ ._-]?cinema)\b"),
+        ("ZEE5", r"\b(zee5)\b"),
+        ("SONYLIV", r"\b(sliv|sony[ ._-]?liv)\b"),
+        ("SUNNXT", r"\b(snxt|sun[ ._-]?nxt)\b"),
+        ("AHA", r"\b(aha)\b[ ._-]web[ ._-]?(dl|rip)?\b"),
+        ("AHA", r"\[(AHA)\b|\b(AHA)\]"),
+    ]
+    .into_iter()
+    .map(|(tag, pattern)| StreamingService { tag: tag.into(), pattern: pattern.into() })
+    .collect()
 }
 
 /// Optional replacements for generated labels, keyed by the default label
@@ -330,6 +414,15 @@ impl AppConfig {
                 problems.push(format!("custom format `{}`: {e}", cf.name));
             }
         }
+        for service in &self.naming.streaming_services {
+            let tag = service.tag.trim();
+            if tag.is_empty() {
+                problems.push("streaming service tags must not be empty".into());
+            }
+            if let Err(e) = service.regex() {
+                problems.push(format!("streaming service `{tag}`: {e}"));
+            }
+        }
 
         if problems.is_empty() {
             Ok(())
@@ -398,6 +491,8 @@ mod tests {
         config.profiles[0].subtitle.sdh_pattern = "(unclosed".into();
         config.profiles[0].audio.rules.push(AudioRule { when_original: vec![], keep: vec![] });
         config.naming.movie_format = "{Movie Title".into();
+        config.naming.streaming_services.push(StreamingService { tag: "XYZ".into(), pattern: "(x".into() });
+        config.naming.streaming_services.push(StreamingService { tag: " ".into(), pattern: "x".into() });
         let ConfigError::Invalid(problems) = config.validate().unwrap_err() else {
             panic!("expected Invalid");
         };
@@ -407,5 +502,7 @@ mod tests {
         assert!(all.contains("subtitle SDH pattern"), "{all}");
         assert!(all.contains("audio rule #4"), "{all}");
         assert!(all.contains("movie format: unclosed"), "{all}");
+        assert!(all.contains("streaming service `XYZ`:"), "{all}");
+        assert!(all.contains("streaming service tags must not be empty"), "{all}");
     }
 }
