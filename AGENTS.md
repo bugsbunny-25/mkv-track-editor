@@ -49,8 +49,8 @@ easy to get wrong here.
   the mount, so both unpack the same crate at once and one fails with
   "failed to unpack package ... File exists". Give each stage (and each
   platform) its own `id=`.
-- Pull request CI does not build the image; only `main` and releases
-  do. Build it locally (see above) before merging Dockerfile changes.
+- Pull request CI does not build the image; only `main` does (releases
+  retag `main`'s image). Build it locally (see above) before merging Dockerfile changes.
 
 ## Cargo builds and `target/`
 
@@ -76,7 +76,10 @@ easy to get wrong here.
   and `X.Y.Z` is the next patch/minor/major after the highest `vX.Y.Z` tag.
   It bumps `Cargo.toml` on `main` itself (`[skip ci]`) when needed, so don't
   bump by hand or push `release/*` branches; `ci.yml` no longer runs for
-  them. Re-run a failed release's failed jobs rather than starting a new one.
+  them. It builds nothing: it retags `main`'s `:sha-<commit>` image and
+  repackages that run's desktop archives with `package-desktop.sh`, so keep
+  `release.yml`'s platform list in step with `ci.yml`'s desktop matrix.
+  Re-run a failed release's failed jobs rather than starting a new one.
 - A release run creates a GitHub release here (publishing it creates the
   `vX.Y.Z` tag), then publishes the archives to the tap repo with a
   **cask** for macOS (`packaging/homebrew/render-cask.sh`, installs the app

@@ -4,23 +4,32 @@ name: Release
 # workflow, entering the version (X.Y.Z), or
 #   gh workflow run release.yml -f version=X.Y.Z
 #
+# Nothing is built again: the release promotes main's latest CI run, which
+# already built, tested and published this code.
+#
 # 1. main must be green: its latest CI run (tests, builds and both images)
-#    succeeded, and only "[skip ci]" version bumps came after it.
+#    succeeded, and only "[skip ci]" version bumps came after it. That run's
+#    desktop archives and :sha-<commit> image must still exist (archives
+#    expire after 90 days; re-run main's CI to rebuild them).
 # 2. The version must be the next one after the highest vX.Y.Z tag: its
 #    next patch, minor or major version. If Cargo.toml has another version,
 #    it's bumped on main in a "[skip ci]" commit, so main's CI doesn't run
 #    again for it.
-# 3. ci.yml builds that commit and publishes it: image tags, the GitHub
-#    release (publishing it creates the vX.Y.Z tag) and Homebrew.
+# 3. The run's image gets the tags :X.Y.Z, :X.Y and :latest, and its desktop
+#    binaries are repackaged as X.Y.Z archives.
+# 4. The GitHub release is created as a draft, gets the archives and is
+#    published, which creates the vX.Y.Z tag on the release commit. Then the
+#    archives, cask and formula go to the Homebrew tap and are
+#    install-tested.
 #
 # A failed run can be re-run from its page ("Re-run failed jobs"): it
-# releases the same version from the same commit.
+# releases the same version from the same build.
 #
 # Needs the repository secret RELEASE_TOKEN: a fine-grained personal access
 # token of a repository admin, limited to this repository, with Contents:
 # Read and write. main's branch protection requires CI checks that a
 # "[skip ci]" commit never gets; admins may push past them, the workflow's
-# own GITHUB_TOKEN may not.
+# own GITHUB_TOKEN may not. HOMEBREW_TAP_TOKEN is described in the README.
 on:
   workflow_dispatch:
     inputs:
@@ -36,6 +45,12 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  IMAGE: ghcr.io/bugsbunny-25/mkv-track-editor
+  TAP_REPO: bugsbunny-25/homebrew-tap
+  # How users tap it: `brew tap` drops the homebrew- prefix.
+  TAP: bugsbunny-25/tap
+
 jobs:
   prepare:
     name: Prepare
@@ -43,9 +58,14 @@ jobs:
     permissions:
       contents: read
       actions: read
+      packages: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      # The commit the release (and its tag) points at.
       sha: ${{ steps.bump.outputs.sha }}
+      # main's green CI run, whose build is released.
+      run-id: ${{ steps.green.outputs.run-id }}
+      built-sha: ${{ steps.green.outputs.sha }}
     steps:
       - name: Check how the release was started
         env:
@@ -66,12 +86,13 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
 
-      - name: Check that main is green
+      - id: green
+        name: Check that main is green
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           run=$(gh run list --workflow ci.yml --branch main --event push --limit 1 \
-            --json headSha,status,conclusion,url --jq '.[0] // empty')
+            --json databaseId,headSha,status,conclusion,url --jq '.[0] // empty')
           if [[ -z "$run" ]]; then
             echo "::error::main has no CI run"
             exit 1
@@ -104,7 +125,32 @@ jobs:
               exit 1
             fi
           done
+          {
+            echo "run-id=$(jq -r .databaseId <<< "$run")"
+            echo "sha=$run_sha"
+          } >> "$GITHUB_OUTPUT"
           echo "main is green: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # Before anything is bumped: the build to release must still exist.
+      - name: Check that main's build is available
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.green.outputs.run-id }}
+          SHA: ${{ steps.green.outputs.sha }}
+        run: |
+          artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.expired | not) | .name')
+          for platform in macos-arm64 linux-x86_64 linux-arm64; do
+            if ! grep -q -x "mkv-track-editor-$platform" <<< "$artifacts"; then
+              echo "::error::main's CI run $RUN_ID has no mkv-track-editor-$platform archive (expired?). Re-run it: gh run rerun $RUN_ID"
+              exit 1
+            fi
+          done
+          docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          if ! docker buildx imagetools inspect "$IMAGE:sha-${SHA::7}" >/dev/null; then
+            echo "::error::$IMAGE:sha-${SHA::7} is missing. Re-run main's CI: gh run rerun $RUN_ID"
+            exit 1
+          fi
 
       - id: version
         name: Check the version
@@ -170,15 +216,226 @@ jobs:
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-  release:
-    name: Build and publish
+  image:
+    name: Image
     needs: prepare
-    uses: ./.github/workflows/ci.yml
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      ref: ${{ needs.prepare.outputs.sha }}
-    secrets:
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      BUILT_SHA: ${{ needs.prepare.outputs.built-sha }}
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Adds the release tags to main's multi-arch image; nothing is rebuilt.
+      - run: |
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.version=$VERSION" \
+            -t "$IMAGE:$VERSION" -t "$IMAGE:${VERSION%.*}" -t "$IMAGE:latest" \
+            "$IMAGE:sha-${BUILT_SHA::7}"
+      - run: docker buildx imagetools inspect "$IMAGE:$VERSION"
+
+  desktop:
+    name: Desktop (${{ matrix.platform }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        # The platforms ci.yml builds. Repackaging needs no compiler, but the
+        # macOS app is assembled and signed with macOS tools.
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-26.04
+          - platform: linux-arm64
+            runner: ubuntu-26.04
+          - platform: macos-arm64
+            runner: macos-26
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: mkv-track-editor-${{ matrix.platform }}
+          path: ${{ runner.temp }}/main
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.prepare.outputs.run-id }}
+      # main's archive holds the binary as the release would: take it out
+      # and package it again under the release version.
+      - run: |
+          archive=$(ls "$RUNNER_TEMP"/main/*.tar.gz)
+          mkdir -p "$RUNNER_TEMP/unpacked"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/unpacked"
+          binary=$(find "$RUNNER_TEMP/unpacked" -type f -path '*/mkv-track-editor' -perm -u+x | head -n 1)
+          [[ -n "$binary" ]]
+          packaging/package-desktop.sh "${{ needs.prepare.outputs.version }}" "${{ matrix.platform }}" "$binary"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/*.tar.gz*
+          if-no-files-found: error
+          overwrite: true
+
+  github-release:
+    name: GitHub release
+    needs: [prepare, image, desktop]
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
-      packages: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+      # The release is created as a draft, gets the archives, and is then
+      # published, which creates the vX.Y.Z tag on the release commit. Safe
+      # to re-run: an existing draft or release is reused and its archives
+      # replaced.
+      - name: Publish the release and tag it
+        run: |
+          tag="v$VERSION"
+          tagged=$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)
+          if [[ -n "$tagged" && "$tagged" != "$SHA" ]]; then
+            echo "::error::Tag $tag already exists on $tagged, not on the release commit $SHA"
+            exit 1
+          fi
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            cat > "$RUNNER_TEMP/notes.md" <<EOF
+          ## Install
+
+          - macOS (Apple silicon): \`brew install --cask $TAP/mkv-track-editor\`
+          - Linux (x86_64, arm64): \`brew install $TAP/mkv-track-editor\`
+          - Docker: \`docker pull $IMAGE:$VERSION\`
+
+          EOF
+            gh release create "$tag" --draft --target "$SHA" \
+              --title "MKV Track Editor $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --generate-notes
+          fi
+          gh release upload "$tag" --clobber dist/*.tar.gz dist/*.sha256
+          if [[ "$(gh release view "$tag" --json isDraft -q .isDraft)" == true ]]; then
+            gh release edit "$tag" --draft=false --latest
+          fi
+          git fetch --quiet origin "refs/tags/$tag:refs/tags/$tag"
+          [[ "$(git rev-parse "$tag^{commit}")" == "$SHA" ]]
+
+  homebrew:
+    name: Homebrew release
+    needs: [prepare, github-release]
+    runs-on: ubuntu-26.04
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      # Fine-grained token with Contents: read and write on the tap repo.
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+      - name: Publish archives to the tap's GitHub release
+        run: |
+          tag="mkv-track-editor-v$VERSION"
+          if ! gh release view "$tag" --repo "$TAP_REPO" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$TAP_REPO" --latest \
+              --title "MKV Track Editor $VERSION" \
+              --notes "Desktop builds of MKV Track Editor $VERSION. Install with \`brew install --cask $TAP/mkv-track-editor\` (macOS) or \`brew install $TAP/mkv-track-editor\` (Linux). Docker: \`$IMAGE:$VERSION\`."
+          fi
+          # Re-running the release replaces the archives.
+          gh release upload "$tag" --repo "$TAP_REPO" --clobber dist/*.tar.gz dist/*.sha256
+      - name: Render cask and formula
+        run: |
+          sha() { cut -d' ' -f1 "dist/mkv-track-editor-$VERSION-$1.tar.gz.sha256"; }
+          mkdir -p "$RUNNER_TEMP/Casks" "$RUNNER_TEMP/Formula"
+          SHA256_MACOS_ARM64=$(sha macos-arm64) \
+            packaging/homebrew/render-cask.sh > "$RUNNER_TEMP/Casks/mkv-track-editor.rb"
+          SHA256_LINUX_X86_64=$(sha linux-x86_64) \
+          SHA256_LINUX_ARM64=$(sha linux-arm64) \
+            packaging/homebrew/render-formula.sh > "$RUNNER_TEMP/Formula/mkv-track-editor.rb"
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Commit cask and formula to the tap
+        working-directory: tap
+        run: |
+          mkdir -p Casks Formula
+          cp "$RUNNER_TEMP/Casks/mkv-track-editor.rb" Casks/mkv-track-editor.rb
+          cp "$RUNNER_TEMP/Formula/mkv-track-editor.rb" Formula/mkv-track-editor.rb
+          git add Casks/mkv-track-editor.rb Formula/mkv-track-editor.rb
+          if git diff --cached --quiet; then
+            echo "Cask and formula unchanged"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "mkv-track-editor $VERSION"
+          git push
+
+  homebrew-verify:
+    name: Homebrew install (${{ matrix.runner }})
+    needs: [prepare, homebrew]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, ubuntu-26.04, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.runner }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Set up Homebrew
+        run: |
+          if [[ "$RUNNER_OS" == Linux && ! -x /home/linuxbrew/.linuxbrew/bin/brew ]]; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          fi
+          for brew in /opt/homebrew/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+            [[ -x "$brew" ]] && dirname "$brew" >> "$GITHUB_PATH" && break
+          done
+      # `brew install` updates Homebrew first for users; do it once here so
+      # the check runs the Homebrew they get, not the runner image's stale
+      # copy (its patchelf.rb 1.6.2 can't add an RPATH to lld-linked x86_64
+      # binaries: Encoding::CompatibilityError in `patch!`).
+      - run: brew update
+      - run: brew tap "$TAP"
+      # macOS: the cask puts the app in /Applications. Its first launch
+      # needs "Open Anyway" (the app isn't notarized), so check the install
+      # and the bundle signature rather than running it.
+      - if: runner.os == 'macOS'
+        run: |
+          brew install --cask "$TAP/mkv-track-editor"
+          codesign --verify --strict --verbose=2 "/Applications/MKV Track Editor.app"
+          [[ -x "$(brew --prefix)/bin/mkv-track-editor" ]]
+          version=$(brew list --cask --versions mkv-track-editor)
+          echo "$version"
+          [[ "$version" == "mkv-track-editor ${{ needs.prepare.outputs.version }}" ]]
+      - if: runner.os == 'Linux'
+        run: |
+          brew install "$TAP/mkv-track-editor"
+          brew test "$TAP/mkv-track-editor"
+          version=$(brew list --formula --versions mkv-track-editor)
+          echo "$version"
+          [[ "$version" == "mkv-track-editor ${{ needs.prepare.outputs.version }}" ]]

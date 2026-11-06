@@ -383,16 +383,17 @@ templates (including the missing-TMDb-ID case).
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`, and
-for releases, when `.github/workflows/release.yml` calls it.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`.
+Releases come from `.github/workflows/release.yml`, which promotes a green
+`main` build instead of building again.
 
 | | Pull request | `main` | Release `X.Y.Z` |
 |---|---|---|---|
-| `cargo test --workspace` (with real mkvmerge/mediainfo/ffmpeg) | ✓ | ✓ | ✓ |
-| Web build (wasm UI + server) | ✓ | ✓ | ✓ |
-| Desktop build: macOS arm64, Linux x86_64, Linux arm64 | ✓ | ✓ | ✓ |
+| `cargo test --workspace` (with real mkvmerge/mediainfo/ffmpeg) | ✓ | ✓ | (`main`'s run) |
+| Web build (wasm UI + server) | ✓ | ✓ | (`main`'s run) |
+| Desktop build: macOS arm64, Linux x86_64, Linux arm64 | ✓ | ✓ | `main`'s binaries, repackaged as `X.Y.Z` |
 | Desktop archives kept as workflow artifacts | | ✓ | ✓ |
-| Alpine image for amd64 + arm64 pushed to GHCR | | `:main`, `:sha-…` | `:X.Y.Z`, plus `:X.Y` / `:latest` if it's the newest |
+| Alpine image for amd64 + arm64 pushed to GHCR | | `:main`, `:sha-…` | `main`'s image tagged `:X.Y.Z`, `:X.Y`, `:latest` |
 | GitHub release in this repository with the desktop archives, which creates the `vX.Y.Z` tag | | | ✓ |
 | GitHub release + cask (macOS) and formula (Linux) in the Homebrew tap, then install-tested with `brew` on macOS and Linux | | | ✓ |
 
@@ -401,19 +402,25 @@ Release → Run workflow, or `gh workflow run release.yml -f version=X.Y.Z`)
 with the version to release. It:
 
 1. Checks that `main` is green: its latest CI run succeeded (tests, builds
-   and both images), and only `[skip ci]` version bumps came after it.
+   and both images), and only `[skip ci]` version bumps came after it. That
+   run's desktop archives and `:sha-<commit>` image must still exist;
+   archives expire after 90 days, and re-running `main`'s CI rebuilds them.
 2. Checks that `X.Y.Z` is the next patch, minor or major version after the
    highest `vX.Y.Z` tag.
 3. If `Cargo.toml` isn't on `X.Y.Z` yet, bumps it on `main` in a
    `Bump version to X.Y.Z [skip ci]` commit, so `main`'s CI doesn't run
    again.
-4. Builds and publishes that commit with `ci.yml`: image tags, then the
-   GitHub release, created as a draft, given the archives and then
-   published, which creates the `vX.Y.Z` tag, then the Homebrew tap.
+4. Promotes `main`'s build: the image gets the `:X.Y.Z`, `:X.Y` and
+   `:latest` tags, and the desktop binaries are repackaged (no compiling) as
+   `X.Y.Z` archives; the macOS app is re-signed for its new `Info.plist`.
+5. Creates the GitHub release as a draft, uploads the archives and
+   publishes it, which creates the `vX.Y.Z` tag. Then publishes the tap
+   release, cask and formula and install-tests them.
 
-If a release run fails partway, re-run its failed jobs from its page: it
-releases the same version from the same commit, reusing the draft or
-release and replacing its archives.
+A release takes a few minutes, and ships the binaries `main`'s CI tested.
+If a run fails partway, re-run its failed jobs from its page: it releases
+the same version from the same build, reusing the draft or release and
+replacing its archives.
 
 Linux desktop binaries are built on Ubuntu 22.04, so they need glibc 2.35+,
 the same minimum as Homebrew on Linux. Each architecture's image is built on
