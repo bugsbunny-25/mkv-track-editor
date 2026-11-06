@@ -49,8 +49,8 @@ easy to get wrong here.
   the mount, so both unpack the same crate at once and one fails with
   "failed to unpack package ... File exists". Give each stage (and each
   platform) its own `id=`.
-- Pull request CI does not build the image; only `main` and `release/*`
-  do. Build it locally (see above) before merging Dockerfile changes.
+- Pull request CI does not build the image; only `main` does (releases
+  retag `main`'s image). Build it locally (see above) before merging Dockerfile changes.
 
 ## Cargo builds and `target/`
 
@@ -70,14 +70,20 @@ easy to get wrong here.
 
 ## Releases and Homebrew
 
-- Releases are cut by pushing a `release/X.Y.Z` branch whose version matches
-  `Cargo.toml` (see the header of `.github/workflows/ci.yml`); only do it
-  after the `main` run, including both images, is green. Pushing the same
-  release branch again republishes that version.
-- A release run tags `vX.Y.Z` and creates a GitHub release here, then
-  publishes the archives to the tap repo with a **cask** for macOS
-  (`packaging/homebrew/render-cask.sh`, installs the app into
-  /Applications) and a **Linux-only formula** (`render-formula.sh`).
+- Releases are cut by running the Release workflow (`release.yml`) by hand
+  with the version: `gh workflow run release.yml -f version=X.Y.Z`. It
+  refuses unless `main`'s latest CI run, including both images, is green,
+  and `X.Y.Z` is the next patch/minor/major after the highest `vX.Y.Z` tag.
+  It bumps `Cargo.toml` on `main` itself (`[skip ci]`) when needed, so don't
+  bump by hand or push `release/*` branches; `ci.yml` no longer runs for
+  them. It builds nothing: it retags `main`'s `:sha-<commit>` image and
+  repackages that run's desktop archives with `package-desktop.sh`, so keep
+  `release.yml`'s platform list in step with `ci.yml`'s desktop matrix.
+  Re-run a failed release's failed jobs rather than starting a new one.
+- A release run creates a GitHub release here (publishing it creates the
+  `vX.Y.Z` tag), then publishes the archives to the tap repo with a
+  **cask** for macOS (`packaging/homebrew/render-cask.sh`, installs the app
+  into /Applications) and a **Linux-only formula** (`render-formula.sh`).
 - The macOS bundle must be signed as a whole (`codesign --sign -` in
   `packaging/package-desktop.sh`, after the Info.plist and icon are in
   place). The linker's signature covers only the binary, and macOS then
