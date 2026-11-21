@@ -43,7 +43,16 @@ easy to get wrong here.
   that recompiles hundreds of crates on every cold cache. The wasm-bindgen
   CLI is the prebuilt musl release matching the version in `Cargo.lock`
   (checksum-verified); keep it in sync with the lockfile, not pinned.
-- Keep `target/` in `.dockerignore`; the local one is tens of GB.
+- Keep `target/` in `.dockerignore`; the local one is tens of GB. Also keep
+  out anything no stage reads (docs, `docker/`, editor files): `COPY . .`
+  copies the whole context, so a README edit otherwise invalidates the
+  cached compile layers and costs a full rebuild in CI.
+- In CI the image doesn't compile the wasm UI: the Web build job's
+  wasm-pack bundle replaces the `wasm-dist` stage (`build-contexts:
+  wasm-dist=...`). Keep that stage's layout (`/index.html`, `/pkg/`) and
+  the Web build job's "Collect wasm bundle" step in step, and keep the
+  Dockerfile's own wasm stage working for local builds. Apple's `container
+  build` has no `--build-context`, so locally it always builds that stage.
 - Never share a cargo registry cache mount (`/usr/local/cargo/registry`)
   between stages that build in parallel: cargo's package lock is outside
   the mount, so both unpack the same crate at once and one fails with

@@ -54,6 +54,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-wasm \
         target/wasm32-unknown-unknown/release/mkv_web.wasm \
     && wasm-opt -O crates/mkv-web/pkg/mkv_web_bg.wasm -o crates/mkv-web/pkg/mkv_web_bg.wasm
 
+# Only the static files the server serves: index.html and pkg/. CI's "Web
+# build" job already builds this bundle (with wasm-pack, same output) and
+# passes it in with `--build-context wasm-dist=<dir>`, which replaces this
+# stage: neither architecture's image build compiles the UI again, and
+# wasm-builder is skipped. Without that flag it's built here, as before.
+FROM scratch AS wasm-dist
+COPY --from=wasm-builder /workspace/crates/mkv-web/index.html /index.html
+COPY --from=wasm-builder /workspace/crates/mkv-web/pkg /pkg
+
 #####################################################################
 # Stage 2: build the server binary for the target platform. mkv-server
 # has no UI/Slint dependency at all, so this stage stays lean.
@@ -88,8 +97,7 @@ RUN apk add --no-cache mkvtoolnix mediainfo ca-certificates \
 WORKDIR /app
 
 COPY --from=server-builder /mkv-server /app/mkv-server
-COPY --from=wasm-builder /workspace/crates/mkv-web/index.html /app/static/index.html
-COPY --from=wasm-builder /workspace/crates/mkv-web/pkg /app/static/pkg
+COPY --from=wasm-dist / /app/static/
 
 RUN mkdir -p /data/library /data/output /config && chown -R mkv:mkv /app /data /config
 
