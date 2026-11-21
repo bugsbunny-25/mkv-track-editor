@@ -5,3 +5,14 @@ crates/mkv-web/pkg/
 dist/
 .github/
 packaging/
+
+# Files no image stage reads. `COPY . .` copies the whole context, so any
+# change here would otherwise invalidate the cached compile layers and
+# rebuild the server and wasm UI from scratch (~8-15 min per architecture
+# in CI). The Dockerfile itself is still read when it's ignored here.
+**/*.md
+docker/
+.dockerignore
+.gitignore
+.claude/
+**/.DS_Store
