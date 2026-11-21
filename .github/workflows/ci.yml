@@ -26,10 +26,15 @@ env:
   # Slint's winit backend links fontconfig and loads xkbcommon at runtime.
   LINUX_BUILD_DEPS: pkg-config libfontconfig1-dev libxkbcommon-dev
 
+# Each job has a timeout a few times its slowest successful run (a cold
+# image build took 17 min), so a hung step, like the 15-minute apt-get
+# download seen on 2026-11-06, can't hold a runner for GitHub's 6-hour
+# default.
 jobs:
   meta:
     name: Version
     runs-on: ubuntu-26.04
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
       # A push to main: keep the desktop archives and push the image.
@@ -54,6 +59,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       # mkvtoolnix, mediainfo and ffmpeg let mkv-core's real-binary
@@ -69,6 +75,7 @@ jobs:
   web:
     name: Web build
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -100,6 +107,7 @@ jobs:
           - platform: macos-arm64
             runner: macos-26
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - if: runner.os == 'Linux'
@@ -134,6 +142,7 @@ jobs:
           - arch: arm64
             runner: ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -176,6 +185,7 @@ jobs:
     name: Image (multi-arch)
     needs: [meta, docker]
     runs-on: ubuntu-26.04
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
